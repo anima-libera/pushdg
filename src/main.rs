@@ -27,7 +27,7 @@ mod gameplay {
 		Sword,
 		Shield,
 		Rock,
-		Bunny,
+		Bunny { hp: i32 },
 		Slime { hp: i32 },
 	}
 
@@ -35,8 +35,34 @@ mod gameplay {
 		fn mass(&self) -> i32 {
 			match self {
 				Obj::Wall => 10,
-				Obj::Slime { hp } => *hp,
+				Obj::Slime { .. } => 3,
+				Obj::Bunny { .. } => 3,
 				_ => 1,
+			}
+		}
+
+		fn damages(&self) -> i32 {
+			match self {
+				Obj::Sword => 3,
+				Obj::Shield => 0,
+				Obj::Slime { .. } => 2,
+				_ => 1,
+			}
+		}
+
+		fn hp(&self) -> Option<i32> {
+			match self {
+				Obj::Bunny { hp } => Some(*hp),
+				Obj::Slime { hp } => Some(*hp),
+				_ => None,
+			}
+		}
+
+		fn take_damage(&mut self, damages: i32) {
+			match self {
+				Obj::Bunny { hp } => *hp -= damages,
+				Obj::Slime { hp } => *hp -= damages,
+				_ => {},
 			}
 		}
 	}
@@ -84,7 +110,7 @@ mod gameplay {
 			lw.place_tile(IVec2::new(-3, 0), Tile::obj(Obj::Sword));
 			lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Rock));
 			lw.place_tile(IVec2::new(-1, 0), Tile::obj(Obj::Shield));
-			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny));
+			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5 }));
 			lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Slime { hp: 3 }));
 			lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
 			lw
@@ -100,13 +126,33 @@ mod gameplay {
 
 		fn player_coords(&self) -> Option<IVec2> {
 			self.grid.iter().find_map(|(&coords, tile)| {
-				tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Bunny)).then_some(coords)
+				tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Bunny { .. })).then_some(coords)
 			})
 		}
 
 		pub fn player_move(&self, direction: IVec2) -> LogicalWorldTransition {
 			let coords = self.player_coords().unwrap();
-			self.try_to_move(coords, direction, 2)
+			let player_force = 2;
+			self.try_to_move(coords, direction, player_force)
+		}
+
+		fn is_hit_killing(&self, weapon_coords: IVec2, direction: IVec2) -> HitAttemptConsequences {
+			let weapon_obj = self.grid.get(&weapon_coords).as_ref().unwrap().obj.as_ref().unwrap();
+			let target_coords = weapon_coords + direction;
+			if let Some(target_obj) = self.grid.get(&target_coords).as_ref().unwrap().obj.as_ref() {
+				if let Some(target_hp) = target_obj.hp() {
+					let damages = weapon_obj.damages();
+					if weapon_obj.damages() >= target_hp {
+						HitAttemptConsequences::Kill { damages }
+					} else {
+						HitAttemptConsequences::NonLethalHit { damages }
+					}
+				} else {
+					HitAttemptConsequences::TargetIsNotHittable
+				}
+			} else {
+				HitAttemptConsequences::ThereIsNoTraget
+			}
 		}
 
 		/// Returns also the number of objects that do move or that fail to move.
@@ -115,10 +161,11 @@ mod gameplay {
 			pusher_coords: IVec2,
 			direction: IVec2,
 			force: i32,
-		) -> (bool, i32) {
+		) -> MoveAttemptConsequences {
 			let mut coords = pusher_coords;
 			let mut remaining_force = force;
 			let mut length = 0;
+			let mut final_hit = HitAttemptConsequences::ThereIsNoTraget;
 			let success = loop {
 				coords += direction;
 				length += 1;
@@ -126,7 +173,13 @@ mod gameplay {
 					if let Some(dst_obj) = dst_tile.obj.as_ref() {
 						remaining_force -= dst_obj.mass();
 						if remaining_force < 0 {
-							break false;
+							final_hit = self.is_hit_killing(coords - direction, direction);
+							break match final_hit {
+								HitAttemptConsequences::Kill { .. } => true,
+								HitAttemptConsequences::NonLethalHit { .. } => false,
+								HitAttemptConsequences::TargetIsNotHittable => false,
+								HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
+							};
 						}
 					} else {
 						break true;
@@ -135,7 +188,7 @@ mod gameplay {
 					break false;
 				}
 			};
-			(success, length)
+			MoveAttemptConsequences { success, length, final_hit }
 		}
 
 		fn try_to_move(
@@ -146,11 +199,12 @@ mod gameplay {
 		) -> LogicalWorldTransition {
 			let mut res_lw = self.clone();
 			let mut logical_events = vec![];
-			let (push_succeeds, length) = self.is_move_possible(pusher_coords, direction, force);
+			let MoveAttemptConsequences { success, length, final_hit } =
+				self.is_move_possible(pusher_coords, direction, force);
 			let mut coords = pusher_coords;
 			let mut previous_obj = None;
 			for _ in 0..length {
-				if push_succeeds {
+				if success {
 					std::mem::swap(
 						&mut previous_obj,
 						&mut res_lw.grid.get_mut(&coords).unwrap().obj,
@@ -172,20 +226,83 @@ mod gameplay {
 				}
 				coords += direction;
 			}
-			if push_succeeds {
+			if success {
 				std::mem::swap(
 					&mut previous_obj,
 					&mut res_lw.grid.get_mut(&coords).unwrap().obj,
 				);
+				match final_hit {
+					HitAttemptConsequences::Kill { damages } => {
+						let target_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::Killed {
+							obj: target_obj,
+							coords,
+							hit_direction: direction,
+							damages,
+						});
+					},
+					HitAttemptConsequences::NonLethalHit { .. } => unreachable!(),
+					HitAttemptConsequences::TargetIsNotHittable => {},
+					HitAttemptConsequences::ThereIsNoTraget => assert!(previous_obj.is_none()),
+				}
 				assert!(previous_obj.is_none());
+			} else {
+				match final_hit {
+					HitAttemptConsequences::Kill { .. } => unreachable!(),
+					HitAttemptConsequences::NonLethalHit { damages } => {
+						let target_obj = res_lw.grid.get_mut(&coords).unwrap().obj.as_mut().unwrap();
+						target_obj.take_damage(damages);
+						logical_events.push(LogicalEvent::Hit {
+							obj: target_obj.clone(),
+							coords,
+							hit_direction: direction,
+							damages,
+						});
+					},
+					HitAttemptConsequences::TargetIsNotHittable => {},
+					HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
+				}
 			}
 			LogicalWorldTransition { resulting_lw: res_lw, logical_events }
 		}
 	}
 
+	enum HitAttemptConsequences {
+		ThereIsNoTraget,
+		TargetIsNotHittable,
+		NonLethalHit { damages: i32 },
+		Kill { damages: i32 },
+	}
+
+	struct MoveAttemptConsequences {
+		success: bool,
+		length: i32,
+		final_hit: HitAttemptConsequences,
+	}
+
 	pub enum LogicalEvent {
-		Move { obj: Obj, from: IVec2, to: IVec2 },
-		FailToMove { obj: Obj, from: IVec2, to: IVec2 },
+		Move {
+			obj: Obj,
+			from: IVec2,
+			to: IVec2,
+		},
+		FailToMove {
+			obj: Obj,
+			from: IVec2,
+			to: IVec2,
+		},
+		Hit {
+			obj: Obj,
+			coords: IVec2,
+			hit_direction: IVec2,
+			damages: i32,
+		},
+		Killed {
+			obj: Obj,
+			coords: IVec2,
+			hit_direction: IVec2,
+			damages: i32,
+		},
 	}
 
 	pub struct LogicalWorldTransition {
@@ -384,7 +501,7 @@ mod graphics {
 						Obj::Sword => SpriteFromSheet::Sword,
 						Obj::Shield => SpriteFromSheet::Shield,
 						Obj::Rock => SpriteFromSheet::Rock,
-						Obj::Bunny => SpriteFromSheet::Bunny,
+						Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 						Obj::Slime { .. } => SpriteFromSheet::Slime,
 					};
 					let move_animation =
