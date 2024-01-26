@@ -107,13 +107,15 @@ mod gameplay {
 }
 
 mod graphics {
+	use std::time::{Duration, Instant};
+
 	use ggez::{
 		glam::Vec2,
 		graphics::{Canvas, Color, DrawParam, Image, Rect},
 		Context, GameResult,
 	};
 
-	use crate::gameplay::{Ground, LogicalWorld, Obj};
+	use crate::gameplay::{Ground, LogicalEvent, LogicalWorld, LogicalWorldTransition, Obj};
 
 	enum DepthLayer {
 		Floor,
@@ -159,11 +161,47 @@ mod graphics {
 		}
 	}
 
+	struct TimeInterval {
+		start_time: Instant,
+		duration: Duration,
+	}
+
+	impl TimeInterval {
+		fn with_duration(duration: Duration) -> TimeInterval {
+			assert!(!duration.is_zero());
+			TimeInterval { start_time: Instant::now(), duration }
+		}
+
+		fn progress(&self) -> f32 {
+			(self.start_time.elapsed().as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0)
+		}
+	}
+
+	struct MoveAnimation {
+		from: Vec2,
+		to: Vec2,
+		time_interval: TimeInterval,
+	}
+
+	impl MoveAnimation {
+		fn new(from: Vec2, to: Vec2) -> MoveAnimation {
+			MoveAnimation {
+				from,
+				to,
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+			}
+		}
+
+		fn current_position(&self) -> Vec2 {
+			self.from + self.time_interval.progress() * (self.to - self.from)
+		}
+	}
+
 	struct DisplayedSprite {
 		sprite_from_sheet: SpriteFromSheet,
 		center: Vec2,
 		depth_layer: DepthLayer,
-		// TODO: add effects here
+		move_animation: Option<MoveAnimation>,
 	}
 
 	impl DisplayedSprite {
@@ -171,8 +209,17 @@ mod graphics {
 			sprite_from_sheet: SpriteFromSheet,
 			center: Vec2,
 			depth_layer: DepthLayer,
+			move_animation: Option<MoveAnimation>,
 		) -> DisplayedSprite {
-			DisplayedSprite { sprite_from_sheet, center, depth_layer }
+			DisplayedSprite { sprite_from_sheet, center, depth_layer, move_animation }
+		}
+
+		fn center(&self) -> Vec2 {
+			if let Some(move_animation) = self.move_animation.as_ref() {
+				move_animation.current_position()
+			} else {
+				self.center
+			}
 		}
 	}
 
@@ -186,13 +233,19 @@ mod graphics {
 		}
 
 		pub fn from_logical_world(lw: &LogicalWorld) -> GraphicalWorld {
+			let lw_trans = LogicalWorldTransition { resulting_lw: lw.clone(), logical_events: vec![] };
+			GraphicalWorld::from_logical_world_transition(&lw_trans)
+		}
+
+		pub fn from_logical_world_transition(lw_trans: &LogicalWorldTransition) -> GraphicalWorld {
 			let mut gw = GraphicalWorld::new();
-			for (coords, tile) in lw.tiles() {
+			for (coords, tile) in lw_trans.resulting_lw.tiles() {
 				if matches!(tile.ground, Ground::Floor) {
 					gw.add_sprite(DisplayedSprite::new(
 						SpriteFromSheet::Floor,
 						coords.as_vec2(),
 						DepthLayer::Floor,
+						None,
 					));
 				}
 				if let Some(obj) = tile.obj.as_ref() {
@@ -204,10 +257,18 @@ mod graphics {
 						Obj::Bunny => SpriteFromSheet::Bunny,
 						Obj::Slime { .. } => SpriteFromSheet::Slime,
 					};
+					let animation =
+						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+							LogicalEvent::Move { from, to, .. } if *to == coords => {
+								Some(MoveAnimation::new(from.as_vec2(), coords.as_vec2()))
+							},
+							_ => None,
+						});
 					gw.add_sprite(DisplayedSprite::new(
 						sprite_from_sheet,
 						coords.as_vec2(),
 						DepthLayer::Obj,
+						animation,
 					));
 				}
 			}
@@ -226,8 +287,8 @@ mod graphics {
 		) -> GameResult {
 			let sprite_size_px = 8.0 * 7.0;
 			for sprite in self.sprites.iter() {
-				let top_left =
-					sprite.center * sprite_size_px - Vec2::new(1.0, 1.0) * sprite_size_px / 2.0;
+				let center = sprite.center();
+				let top_left = center * sprite_size_px - Vec2::new(1.0, 1.0) * sprite_size_px / 2.0;
 				let top_left = top_left + Vec2::new(400.0, 400.0);
 				canvas.draw(
 					spritesheet,
@@ -260,9 +321,9 @@ impl Game {
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
-		let transition = self.current_lw.player_move(direction);
-		self.gw = GraphicalWorld::from_logical_world(&transition.resulting_lw);
-		self.current_lw = transition.resulting_lw;
+		let lw_trans = self.current_lw.player_move(direction);
+		self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
+		self.current_lw = lw_trans.resulting_lw;
 	}
 }
 
