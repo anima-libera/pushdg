@@ -3,12 +3,13 @@ use ggez::{
 	conf::{WindowMode, WindowSetup},
 	event::{run, EventHandler},
 	glam::IVec2,
-	graphics::{Canvas, Color, Image, Sampler},
+	graphics::{Canvas, Color, Image, ImageFormat, Sampler},
 	input::keyboard::KeyInput,
 	winit::event::VirtualKeyCode,
 	Context, ContextBuilder, GameResult,
 };
 use graphics::GraphicalWorld;
+use image::EncodableLayout;
 
 mod gameplay {
 	use std::collections::HashMap;
@@ -236,7 +237,7 @@ mod gameplay {
 						let target_obj = previous_obj.take().unwrap();
 						logical_events.push(LogicalEvent::Killed {
 							obj: target_obj,
-							coords,
+							at: coords,
 							hit_direction: direction,
 							damages,
 						});
@@ -254,7 +255,7 @@ mod gameplay {
 						target_obj.take_damage(damages);
 						logical_events.push(LogicalEvent::Hit {
 							obj: target_obj.clone(),
-							coords,
+							at: coords,
 							hit_direction: direction,
 							damages,
 						});
@@ -293,13 +294,13 @@ mod gameplay {
 		},
 		Hit {
 			obj: Obj,
-			coords: IVec2,
+			at: IVec2,
 			hit_direction: IVec2,
 			damages: i32,
 		},
 		Killed {
 			obj: Obj,
-			coords: IVec2,
+			at: IVec2,
 			hit_direction: IVec2,
 			damages: i32,
 		},
@@ -316,16 +317,20 @@ mod graphics {
 
 	use ggez::{
 		glam::Vec2,
-		graphics::{Canvas, Color, DrawParam, Image, Rect},
+		graphics::{Canvas, Color, DrawParam, Rect},
 		Context, GameResult,
 	};
 
-	use crate::gameplay::{Ground, LogicalEvent, LogicalWorld, LogicalWorldTransition, Obj};
+	use crate::{
+		gameplay::{Ground, LogicalEvent, LogicalWorld, LogicalWorldTransition, Obj},
+		SpritesheetStuff,
+	};
 
 	enum DepthLayer {
 		Floor,
 		Obj,
 		AnimatedObj,
+		TemporaryText,
 	}
 
 	impl DepthLayer {
@@ -334,6 +339,7 @@ mod graphics {
 				DepthLayer::Floor => 1,
 				DepthLayer::Obj => 2,
 				DepthLayer::AnimatedObj => 3,
+				DepthLayer::TemporaryText => 4,
 			}
 		}
 	}
@@ -346,10 +352,16 @@ mod graphics {
 		Rock,
 		Bunny,
 		Slime,
+		Digit(u8),
 	}
 
 	impl SpriteFromSheet {
 		fn rect_in_spritesheet(&self) -> Rect {
+			if let SpriteFromSheet::Digit(digit) = self {
+				let x = digit * 4;
+				let y = 16;
+				return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
+			}
 			let (x, y) = match self {
 				SpriteFromSheet::Wall => (0, 0),
 				SpriteFromSheet::Floor => (0, 1),
@@ -358,6 +370,7 @@ mod graphics {
 				SpriteFromSheet::Rock => (3, 0),
 				SpriteFromSheet::Bunny => (4, 0),
 				SpriteFromSheet::Slime => (5, 0),
+				SpriteFromSheet::Digit(_) => unreachable!(),
 			};
 			Rect::new(
 				x as f32 * 8.0 / 128.0,
@@ -433,12 +446,60 @@ mod graphics {
 		}
 	}
 
+	struct HitAnimation {
+		time_interval: TimeInterval,
+	}
+
+	impl HitAnimation {
+		fn new() -> HitAnimation {
+			HitAnimation {
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+			}
+		}
+
+		fn current_plain_color(&self) -> Option<Color> {
+			(self.time_interval.progress() < 1.0).then_some(Color::RED)
+		}
+	}
+
+	struct TemporaryTextAnimation {
+		from: Vec2,
+		to: Vec2,
+		color: Color,
+		time_interval: TimeInterval,
+	}
+
+	impl TemporaryTextAnimation {
+		fn new(from: Vec2, to: Vec2, color: Color) -> TemporaryTextAnimation {
+			TemporaryTextAnimation {
+				from,
+				to,
+				color,
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.4)),
+			}
+		}
+
+		fn currently_visible(&self) -> bool {
+			self.time_interval.progress() < 1.0
+		}
+
+		fn current_position(&self) -> Vec2 {
+			self.from + self.time_interval.progress() * (self.to - self.from)
+		}
+
+		fn current_plain_color(&self) -> Option<Color> {
+			Some(self.color)
+		}
+	}
+
 	struct DisplayedSprite {
 		sprite_from_sheet: SpriteFromSheet,
 		center: Vec2,
 		depth_layer: DepthLayer,
 		move_animation: Option<MoveAnimation>,
 		fail_to_move_animation: Option<FailToMoveAnimation>,
+		hit_animation: Option<HitAnimation>,
+		temporary_text_animation: Option<TemporaryTextAnimation>,
 	}
 
 	impl DisplayedSprite {
@@ -448,6 +509,8 @@ mod graphics {
 			depth_layer: DepthLayer,
 			move_animation: Option<MoveAnimation>,
 			fail_to_move_animation: Option<FailToMoveAnimation>,
+			hit_animation: Option<HitAnimation>,
+			temporary_text_animation: Option<TemporaryTextAnimation>,
 		) -> DisplayedSprite {
 			DisplayedSprite {
 				sprite_from_sheet,
@@ -455,6 +518,16 @@ mod graphics {
 				depth_layer,
 				move_animation,
 				fail_to_move_animation,
+				hit_animation,
+				temporary_text_animation,
+			}
+		}
+
+		fn visible(&self) -> bool {
+			if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
+				temporary_text_animation.currently_visible()
+			} else {
+				true
 			}
 		}
 
@@ -463,8 +536,20 @@ mod graphics {
 				move_animation.current_position()
 			} else if let Some(fail_to_move_animation) = self.fail_to_move_animation.as_ref() {
 				fail_to_move_animation.current_position()
+			} else if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
+				temporary_text_animation.current_position()
 			} else {
 				self.center
+			}
+		}
+
+		fn plain_color(&self) -> Option<Color> {
+			if let Some(hit_animation) = self.hit_animation.as_ref() {
+				hit_animation.current_plain_color()
+			} else if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
+				temporary_text_animation.current_plain_color()
+			} else {
+				None
 			}
 		}
 	}
@@ -493,6 +578,8 @@ mod graphics {
 						DepthLayer::Floor,
 						None,
 						None,
+						None,
+						None,
 					));
 				}
 				if let Some(obj) = tile.obj.as_ref() {
@@ -518,6 +605,11 @@ mod graphics {
 							},
 							_ => None,
 						});
+					let hit_animation =
+						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+							LogicalEvent::Hit { at, .. } if *at == coords => Some(HitAnimation::new()),
+							_ => None,
+						});
 					let depth_layer = if move_animation.is_some() || fail_to_move_animation.is_some() {
 						DepthLayer::AnimatedObj
 					} else {
@@ -529,7 +621,29 @@ mod graphics {
 						depth_layer,
 						move_animation,
 						fail_to_move_animation,
+						hit_animation,
+						None,
 					));
+				}
+			}
+			for logical_event in lw_trans.logical_events.iter() {
+				match logical_event {
+					LogicalEvent::Killed { at, damages, .. } | LogicalEvent::Hit { at, damages, .. } => {
+						gw.add_sprite(DisplayedSprite::new(
+							SpriteFromSheet::Digit(*damages as u8),
+							at.as_vec2(),
+							DepthLayer::TemporaryText,
+							None,
+							None,
+							None,
+							Some(TemporaryTextAnimation::new(
+								at.as_vec2(),
+								at.as_vec2() + Vec2::new(0.0, -1.5),
+								Color::RED,
+							)),
+						));
+					},
+					_ => {},
 				}
 			}
 			gw
@@ -543,13 +657,22 @@ mod graphics {
 			&self,
 			_ctx: &mut Context,
 			canvas: &mut Canvas,
-			spritesheet: &Image,
+			spritesheet_stuff: &SpritesheetStuff,
 		) -> GameResult {
 			let sprite_size_px = 8.0 * 7.0;
 			for sprite in self.sprites.iter() {
+				if !sprite.visible() {
+					continue;
+				}
 				let center = sprite.center();
 				let top_left = center * sprite_size_px - Vec2::new(1.0, 1.0) * sprite_size_px / 2.0;
 				let top_left = top_left + Vec2::new(400.0, 400.0);
+				let plain_color = sprite.plain_color();
+				let (spritesheet, color) = if let Some(color) = plain_color {
+					(&spritesheet_stuff.spritesheet_white, color)
+				} else {
+					(&spritesheet_stuff.spritesheet, Color::WHITE)
+				};
 				canvas.draw(
 					spritesheet,
 					DrawParam::default()
@@ -558,7 +681,7 @@ mod graphics {
 						.scale(Vec2::new(1.0, 1.0) * sprite_size_px / 8.0)
 						.src(sprite.sprite_from_sheet.rect_in_spritesheet())
 						.z(sprite.depth_layer.to_z_value())
-						.color(Color::WHITE),
+						.color(color),
 				);
 			}
 			Ok(())
@@ -566,18 +689,54 @@ mod graphics {
 	}
 }
 
+struct SpritesheetStuff {
+	spritesheet: Image,
+	/// Used as a mask to multiply it by a color for like hit effect red blinking.
+	spritesheet_white: Image,
+}
+
+impl SpritesheetStuff {
+	fn new(ctx: &mut Context) -> GameResult<SpritesheetStuff> {
+		let mut image = image::load_from_memory(include_bytes!("../assets/spritesheet.png")).unwrap();
+		let spritesheet = Image::from_pixels(
+			&ctx.gfx,
+			image.as_rgba8().unwrap().as_bytes(),
+			ImageFormat::Rgba8UnormSrgb,
+			image.width(),
+			image.height(),
+		);
+
+		image.as_mut_rgba8().unwrap().pixels_mut().for_each(|pixel| {
+			if pixel.0[3] != 0 {
+				pixel.0[0] = 255;
+				pixel.0[1] = 255;
+				pixel.0[2] = 255;
+			}
+		});
+		let spritesheet_white = Image::from_pixels(
+			&ctx.gfx,
+			image.as_rgba8().unwrap().as_bytes(),
+			ImageFormat::Rgba8UnormSrgb,
+			image.width(),
+			image.height(),
+		);
+
+		Ok(SpritesheetStuff { spritesheet, spritesheet_white })
+	}
+}
+
 struct Game {
 	current_lw: LogicalWorld,
 	gw: GraphicalWorld,
-	spritesheet: Image,
+	spritesheet_stuff: SpritesheetStuff,
 }
 
 impl Game {
 	fn new(ctx: &mut Context) -> GameResult<Game> {
 		let lw = LogicalWorld::new_test();
 		let gw = GraphicalWorld::from_logical_world(&lw);
-		let spritesheet = Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?;
-		Ok(Game { current_lw: lw, gw, spritesheet })
+		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
+		Ok(Game { current_lw: lw, gw, spritesheet_stuff })
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
@@ -610,7 +769,7 @@ impl EventHandler for Game {
 	fn draw(&mut self, ctx: &mut Context) -> GameResult {
 		let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
 		canvas.set_sampler(Sampler::nearest_clamp());
-		self.gw.draw(ctx, &mut canvas, &self.spritesheet)?;
+		self.gw.draw(ctx, &mut canvas, &self.spritesheet_stuff)?;
 		canvas.finish(ctx)?;
 		Ok(())
 	}
