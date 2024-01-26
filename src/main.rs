@@ -31,6 +31,16 @@ mod gameplay {
 		Slime { hp: i32 },
 	}
 
+	impl Obj {
+		fn mass(&self) -> i32 {
+			match self {
+				Obj::Wall => 10,
+				Obj::Slime { hp } => *hp,
+				_ => 1,
+			}
+		}
+	}
+
 	#[derive(Clone)]
 	pub struct Tile {
 		pub ground: Ground,
@@ -59,15 +69,24 @@ mod gameplay {
 
 		pub fn new_test() -> LogicalWorld {
 			let mut lw = LogicalWorld::new_empty();
+			let r = 5;
+			for y in (-r)..=r {
+				for x in (-r)..=r {
+					lw.place_tile(IVec2::new(x, y), Tile::obj(Obj::Wall));
+				}
+			}
+			let r = r - 1;
+			for y in (-r)..=r {
+				for x in (-r)..=r {
+					lw.place_tile(IVec2::new(x, y), Tile::floor());
+				}
+			}
 			lw.place_tile(IVec2::new(-3, 0), Tile::obj(Obj::Sword));
 			lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Rock));
 			lw.place_tile(IVec2::new(-1, 0), Tile::obj(Obj::Shield));
 			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny));
-			lw.place_tile(IVec2::new(1, 0), Tile::floor());
 			lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Slime { hp: 3 }));
 			lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
-			lw.place_tile(IVec2::new(0, 1), Tile::floor());
-			lw.place_tile(IVec2::new(1, 1), Tile::floor());
 			lw
 		}
 
@@ -86,18 +105,87 @@ mod gameplay {
 		}
 
 		pub fn player_move(&self, direction: IVec2) -> LogicalWorldTransition {
+			let coords = self.player_coords().unwrap();
+			self.try_to_move(coords, direction, 2)
+		}
+
+		/// Returns also the number of objects that do move or that fail to move.
+		fn is_move_possible(
+			&self,
+			pusher_coords: IVec2,
+			direction: IVec2,
+			force: i32,
+		) -> (bool, i32) {
+			let mut coords = pusher_coords;
+			let mut remaining_force = force;
+			let mut length = 0;
+			let success = loop {
+				coords += direction;
+				length += 1;
+				if let Some(dst_tile) = self.grid.get(&coords) {
+					if let Some(dst_obj) = dst_tile.obj.as_ref() {
+						remaining_force -= dst_obj.mass();
+						if remaining_force < 0 {
+							break false;
+						}
+					} else {
+						break true;
+					}
+				} else {
+					break false;
+				}
+			};
+			(success, length)
+		}
+
+		fn try_to_move(
+			&self,
+			pusher_coords: IVec2,
+			direction: IVec2,
+			force: i32,
+		) -> LogicalWorldTransition {
 			let mut res_lw = self.clone();
-			let src = self.player_coords().unwrap();
-			let dst = src + direction;
-			let player_obj = res_lw.grid.get_mut(&src).unwrap().obj.take().unwrap();
-			res_lw.grid.get_mut(&dst).unwrap().obj = Some(player_obj.clone());
-			let logical_events = vec![LogicalEvent::Move { obj: player_obj, from: src, to: dst }];
+			let mut logical_events = vec![];
+			let (push_succeeds, length) = self.is_move_possible(pusher_coords, direction, force);
+			let mut coords = pusher_coords;
+			let mut previous_obj = None;
+			for _ in 0..length {
+				if push_succeeds {
+					std::mem::swap(
+						&mut previous_obj,
+						&mut res_lw.grid.get_mut(&coords).unwrap().obj,
+					);
+					if let Some(obj) = previous_obj.as_ref() {
+						logical_events.push(LogicalEvent::Move {
+							obj: obj.clone(),
+							from: coords,
+							to: coords + direction,
+						});
+					}
+				} else {
+					let obj = res_lw.grid.get(&coords).as_ref().unwrap().obj.as_ref().unwrap().clone();
+					logical_events.push(LogicalEvent::FailToMove {
+						obj,
+						from: coords,
+						to: coords + direction,
+					});
+				}
+				coords += direction;
+			}
+			if push_succeeds {
+				std::mem::swap(
+					&mut previous_obj,
+					&mut res_lw.grid.get_mut(&coords).unwrap().obj,
+				);
+				assert!(previous_obj.is_none());
+			}
 			LogicalWorldTransition { resulting_lw: res_lw, logical_events }
 		}
 	}
 
 	pub enum LogicalEvent {
 		Move { obj: Obj, from: IVec2, to: IVec2 },
+		FailToMove { obj: Obj, from: IVec2, to: IVec2 },
 	}
 
 	pub struct LogicalWorldTransition {
