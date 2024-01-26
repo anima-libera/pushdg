@@ -208,6 +208,7 @@ mod graphics {
 	enum DepthLayer {
 		Floor,
 		Obj,
+		AnimatedObj,
 	}
 
 	impl DepthLayer {
@@ -215,6 +216,7 @@ mod graphics {
 			match self {
 				DepthLayer::Floor => 1,
 				DepthLayer::Obj => 2,
+				DepthLayer::AnimatedObj => 3,
 			}
 		}
 	}
@@ -285,11 +287,41 @@ mod graphics {
 		}
 	}
 
+	struct FailToMoveAnimation {
+		from: Vec2,
+		to: Vec2,
+		time_interval: TimeInterval,
+	}
+
+	impl FailToMoveAnimation {
+		fn new(from: Vec2, to: Vec2) -> FailToMoveAnimation {
+			FailToMoveAnimation {
+				from,
+				to,
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+			}
+		}
+
+		fn current_position(&self) -> Vec2 {
+			let how_far = 0.2;
+			let animation_progress = self.time_interval.progress();
+			let to = self.to * how_far + self.from * (1.0 - how_far);
+			if animation_progress < 0.5 {
+				let forward_prorgess = animation_progress * 2.0;
+				self.from + forward_prorgess * (to - self.from)
+			} else {
+				let backward_prorgess = animation_progress * 2.0 - 1.0;
+				to + backward_prorgess * (self.from - to)
+			}
+		}
+	}
+
 	struct DisplayedSprite {
 		sprite_from_sheet: SpriteFromSheet,
 		center: Vec2,
 		depth_layer: DepthLayer,
 		move_animation: Option<MoveAnimation>,
+		fail_to_move_animation: Option<FailToMoveAnimation>,
 	}
 
 	impl DisplayedSprite {
@@ -298,13 +330,22 @@ mod graphics {
 			center: Vec2,
 			depth_layer: DepthLayer,
 			move_animation: Option<MoveAnimation>,
+			fail_to_move_animation: Option<FailToMoveAnimation>,
 		) -> DisplayedSprite {
-			DisplayedSprite { sprite_from_sheet, center, depth_layer, move_animation }
+			DisplayedSprite {
+				sprite_from_sheet,
+				center,
+				depth_layer,
+				move_animation,
+				fail_to_move_animation,
+			}
 		}
 
 		fn center(&self) -> Vec2 {
 			if let Some(move_animation) = self.move_animation.as_ref() {
 				move_animation.current_position()
+			} else if let Some(fail_to_move_animation) = self.fail_to_move_animation.as_ref() {
+				fail_to_move_animation.current_position()
 			} else {
 				self.center
 			}
@@ -334,6 +375,7 @@ mod graphics {
 						coords.as_vec2(),
 						DepthLayer::Floor,
 						None,
+						None,
 					));
 				}
 				if let Some(obj) = tile.obj.as_ref() {
@@ -345,18 +387,31 @@ mod graphics {
 						Obj::Bunny => SpriteFromSheet::Bunny,
 						Obj::Slime { .. } => SpriteFromSheet::Slime,
 					};
-					let animation =
+					let move_animation =
 						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
 							LogicalEvent::Move { from, to, .. } if *to == coords => {
-								Some(MoveAnimation::new(from.as_vec2(), coords.as_vec2()))
+								Some(MoveAnimation::new(from.as_vec2(), to.as_vec2()))
 							},
 							_ => None,
 						});
+					let fail_to_move_animation =
+						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+							LogicalEvent::FailToMove { from, to, .. } if *from == coords => {
+								Some(FailToMoveAnimation::new(from.as_vec2(), to.as_vec2()))
+							},
+							_ => None,
+						});
+					let depth_layer = if move_animation.is_some() || fail_to_move_animation.is_some() {
+						DepthLayer::AnimatedObj
+					} else {
+						DepthLayer::Obj
+					};
 					gw.add_sprite(DisplayedSprite::new(
 						sprite_from_sheet,
 						coords.as_vec2(),
-						DepthLayer::Obj,
-						animation,
+						depth_layer,
+						move_animation,
+						fail_to_move_animation,
 					));
 				}
 			}
