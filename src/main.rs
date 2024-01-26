@@ -2,7 +2,10 @@ use gameplay::LogicalWorld;
 use ggez::{
 	conf::{WindowMode, WindowSetup},
 	event::{run, EventHandler},
+	glam::IVec2,
 	graphics::{Canvas, Color, Image, Sampler},
+	input::keyboard::KeyInput,
+	winit::event::VirtualKeyCode,
 	Context, ContextBuilder, GameResult,
 };
 use graphics::GraphicalWorld;
@@ -12,11 +15,13 @@ mod gameplay {
 
 	use ggez::glam::IVec2;
 
+	#[derive(Clone)]
 	pub enum Ground {
 		Floor,
-		Hole,
+		// TODO: Hole
 	}
 
+	#[derive(Clone)]
 	pub enum Obj {
 		Wall,
 		Sword,
@@ -26,6 +31,7 @@ mod gameplay {
 		Slime { hp: i32 },
 	}
 
+	#[derive(Clone)]
 	pub struct Tile {
 		pub ground: Ground,
 		pub obj: Option<Obj>,
@@ -41,6 +47,7 @@ mod gameplay {
 		}
 	}
 
+	#[derive(Clone)]
 	pub struct LogicalWorld {
 		grid: HashMap<IVec2, Tile>,
 	}
@@ -57,8 +64,10 @@ mod gameplay {
 			lw.place_tile(IVec2::new(-1, 0), Tile::obj(Obj::Shield));
 			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny));
 			lw.place_tile(IVec2::new(1, 0), Tile::floor());
-			lw.place_tile(IVec2::new(2, 0), Tile::floor());
+			lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Slime { hp: 3 }));
 			lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
+			lw.place_tile(IVec2::new(0, 1), Tile::floor());
+			lw.place_tile(IVec2::new(1, 1), Tile::floor());
 			lw
 		}
 
@@ -69,12 +78,37 @@ mod gameplay {
 		pub fn tiles(&self) -> impl Iterator<Item = (IVec2, &Tile)> {
 			self.grid.iter().map(|(&coords, tile)| (coords, tile))
 		}
+
+		fn player_coords(&self) -> Option<IVec2> {
+			self.grid.iter().find_map(|(&coords, tile)| {
+				tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Bunny)).then_some(coords)
+			})
+		}
+
+		pub fn player_move(&self, direction: IVec2) -> LogicalWorldTransition {
+			let mut res_lw = self.clone();
+			let src = self.player_coords().unwrap();
+			let dst = src + direction;
+			let player_obj = res_lw.grid.get_mut(&src).unwrap().obj.take().unwrap();
+			res_lw.grid.get_mut(&dst).unwrap().obj = Some(player_obj.clone());
+			let logical_events = vec![LogicalEvent::Move { obj: player_obj, from: src, to: dst }];
+			LogicalWorldTransition { resulting_lw: res_lw, logical_events }
+		}
+	}
+
+	pub enum LogicalEvent {
+		Move { obj: Obj, from: IVec2, to: IVec2 },
+	}
+
+	pub struct LogicalWorldTransition {
+		pub logical_events: Vec<LogicalEvent>,
+		pub resulting_lw: LogicalWorld,
 	}
 }
 
 mod graphics {
 	use ggez::{
-		glam::{IVec2, Vec2},
+		glam::Vec2,
 		graphics::{Canvas, Color, DrawParam, Image, Rect},
 		Context, GameResult,
 	};
@@ -224,10 +258,35 @@ impl Game {
 		let spritesheet = Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?;
 		Ok(Game { current_lw: lw, gw, spritesheet })
 	}
+
+	fn player_move(&mut self, direction: IVec2) {
+		let transition = self.current_lw.player_move(direction);
+		self.gw = GraphicalWorld::from_logical_world(&transition.resulting_lw);
+		self.current_lw = transition.resulting_lw;
+	}
 }
 
 impl EventHandler for Game {
 	fn update(&mut self, _ctx: &mut Context) -> GameResult {
+		Ok(())
+	}
+
+	fn key_down_event(
+		&mut self,
+		_ctx: &mut Context,
+		input: KeyInput,
+		_repeated: bool,
+	) -> GameResult {
+		use VirtualKeyCode as K;
+		if let Some(keycode) = input.keycode {
+			match keycode {
+				K::Z | K::W | K::Up => self.player_move(IVec2::new(0, -1)),
+				K::Q | K::A | K::Left => self.player_move(IVec2::new(-1, 0)),
+				K::S | K::Down => self.player_move(IVec2::new(0, 1)),
+				K::D | K::Right => self.player_move(IVec2::new(1, 0)),
+				_ => {},
+			}
+		}
 		Ok(())
 	}
 
