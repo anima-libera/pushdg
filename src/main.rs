@@ -271,15 +271,11 @@ impl EventHandler for Game {
 		Ok(())
 	}
 
-	fn key_down_event(
-		&mut self,
-		_ctx: &mut Context,
-		input: KeyInput,
-		_repeated: bool,
-	) -> GameResult {
+	fn key_down_event(&mut self, ctx: &mut Context, input: KeyInput, _repeated: bool) -> GameResult {
 		use VirtualKeyCode as K;
 		if let Some(keycode) = input.keycode {
 			match keycode {
+				K::Escape => ctx.request_quit(),
 				K::Z | K::W | K::Up => self.player_move(IVec2::new(0, -1)),
 				K::Q | K::A | K::Left => self.player_move(IVec2::new(-1, 0)),
 				K::S | K::Down => self.player_move(IVec2::new(0, 1)),
