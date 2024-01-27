@@ -1,4 +1,4 @@
-use gameplay::LogicalWorld;
+use gameplay::{LogicalWorld, LogicalWorldTransition};
 use ggez::{
 	conf::{WindowMode, WindowSetup},
 	event::{run, EventHandler},
@@ -29,7 +29,7 @@ mod gameplay {
 		Shield,
 		Rock,
 		Bunny { hp: i32 },
-		Slime { hp: i32 },
+		Slime { hp: i32, move_token: bool },
 	}
 
 	impl Obj {
@@ -54,7 +54,7 @@ mod gameplay {
 		fn hp(&self) -> Option<i32> {
 			match self {
 				Obj::Bunny { hp } => Some(*hp),
-				Obj::Slime { hp } => Some(*hp),
+				Obj::Slime { hp, .. } => Some(*hp),
 				_ => None,
 			}
 		}
@@ -62,8 +62,34 @@ mod gameplay {
 		fn take_damage(&mut self, damages: i32) {
 			match self {
 				Obj::Bunny { hp } => *hp -= damages,
-				Obj::Slime { hp } => *hp -= damages,
+				Obj::Slime { hp, .. } => *hp -= damages,
 				_ => {},
+			}
+		}
+
+		fn give_move_token(&mut self) {
+			#[allow(clippy::single_match)]
+			match self {
+				Obj::Slime { move_token, .. } => *move_token = true,
+				_ => {},
+			}
+		}
+
+		fn has_move_token(&self) -> bool {
+			match self {
+				Obj::Slime { move_token, .. } => *move_token,
+				_ => false,
+			}
+		}
+
+		fn take_move_token(&mut self) -> bool {
+			match self {
+				Obj::Slime { move_token, .. } => {
+					let had_move_token = *move_token;
+					*move_token = false;
+					had_move_token
+				},
+				_ => false,
 			}
 		}
 	}
@@ -112,7 +138,18 @@ mod gameplay {
 			lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Rock));
 			lw.place_tile(IVec2::new(-1, 0), Tile::obj(Obj::Shield));
 			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5 }));
-			lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Slime { hp: 3 }));
+			lw.place_tile(
+				IVec2::new(2, 0),
+				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+			);
+			lw.place_tile(
+				IVec2::new(3, 1),
+				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+			);
+			lw.place_tile(
+				IVec2::new(3, -1),
+				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+			);
 			lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
 			lw
 		}
@@ -135,6 +172,51 @@ mod gameplay {
 			let coords = self.player_coords().unwrap();
 			let player_force = 2;
 			self.try_to_move(coords, direction, player_force)
+		}
+
+		pub fn give_move_token_to_agents(&mut self) {
+			for tile in self.grid.values_mut() {
+				if let Some(obj) = tile.obj.as_mut() {
+					obj.give_move_token();
+				}
+			}
+		}
+
+		pub fn handle_move_for_one_agent(&mut self) -> Option<LogicalWorldTransition> {
+			for (coords, tile) in self.grid.iter() {
+				if let Some(obj) = tile.obj.as_ref() {
+					if obj.has_move_token() {
+						let mut res_lw = self.clone();
+						res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
+						return Some(if let Some(direction) = self.ai_decision(*coords) {
+							res_lw.try_to_move(*coords, direction, 2)
+						} else {
+							LogicalWorldTransition { resulting_lw: res_lw, logical_events: vec![] }
+						});
+					}
+				}
+			}
+			None
+		}
+
+		fn ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
+			// Test simple AI.
+			let target_coords = self.player_coords().unwrap();
+			if agent_coords.x == target_coords.x {
+				if target_coords.y < agent_coords.y {
+					Some(IVec2::new(0, -1))
+				} else {
+					Some(IVec2::new(0, 1))
+				}
+			} else if agent_coords.y == target_coords.y {
+				if target_coords.x < agent_coords.x {
+					Some(IVec2::new(-1, 0))
+				} else {
+					Some(IVec2::new(1, 0))
+				}
+			} else {
+				None
+			}
 		}
 
 		fn is_hit_killing(&self, weapon_coords: IVec2, direction: IVec2) -> HitAttemptConsequences {
@@ -281,6 +363,7 @@ mod gameplay {
 		final_hit: HitAttemptConsequences,
 	}
 
+	#[derive(Clone)]
 	pub enum LogicalEvent {
 		Move {
 			obj: Obj,
@@ -306,6 +389,7 @@ mod gameplay {
 		},
 	}
 
+	#[derive(Clone)]
 	pub struct LogicalWorldTransition {
 		pub logical_events: Vec<LogicalEvent>,
 		pub resulting_lw: LogicalWorld,
@@ -523,6 +607,19 @@ mod graphics {
 			}
 		}
 
+		fn has_animation(&self) -> bool {
+			self.move_animation.as_ref().is_some_and(|anim| anim.time_interval.progress() < 1.0)
+				|| self
+					.fail_to_move_animation
+					.as_ref()
+					.is_some_and(|anim| anim.time_interval.progress() < 1.0)
+				|| self.hit_animation.as_ref().is_some_and(|anim| anim.time_interval.progress() < 1.0)
+				|| self
+					.temporary_text_animation
+					.as_ref()
+					.is_some_and(|anim| anim.time_interval.progress() < 1.0)
+		}
+
 		fn visible(&self) -> bool {
 			if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
 				temporary_text_animation.currently_visible()
@@ -566,6 +663,10 @@ mod graphics {
 		pub fn from_logical_world(lw: &LogicalWorld) -> GraphicalWorld {
 			let lw_trans = LogicalWorldTransition { resulting_lw: lw.clone(), logical_events: vec![] };
 			GraphicalWorld::from_logical_world_transition(&lw_trans)
+		}
+
+		pub fn has_animation(&self) -> bool {
+			self.sprites.iter().any(|sprite| sprite.has_animation())
 		}
 
 		pub fn from_logical_world_transition(lw_trans: &LogicalWorldTransition) -> GraphicalWorld {
@@ -725,8 +826,14 @@ impl SpritesheetStuff {
 	}
 }
 
+enum Phase {
+	WaitingForPlayerToMakeAMove,
+	WaitingForAnimationsToFinish(Vec<LogicalWorldTransition>),
+}
+
 struct Game {
 	current_lw: LogicalWorld,
+	phase: Phase,
 	gw: GraphicalWorld,
 	spritesheet_stuff: SpritesheetStuff,
 }
@@ -736,18 +843,42 @@ impl Game {
 		let lw = LogicalWorld::new_test();
 		let gw = GraphicalWorld::from_logical_world(&lw);
 		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
-		Ok(Game { current_lw: lw, gw, spritesheet_stuff })
+		let phase = Phase::WaitingForPlayerToMakeAMove;
+		Ok(Game { current_lw: lw, phase, gw, spritesheet_stuff })
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
-		let lw_trans = self.current_lw.player_move(direction);
-		self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
-		self.current_lw = lw_trans.resulting_lw;
+		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
+			let mut lw_trans = self.current_lw.player_move(direction);
+			self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
+			self.current_lw = lw_trans.resulting_lw.clone();
+
+			// Play all the moves of everyting that is not a player up until the player's next turn.
+			lw_trans.resulting_lw.give_move_token_to_agents();
+			let mut transitions = vec![];
+			while let Some(next_lw_trans) = lw_trans.resulting_lw.handle_move_for_one_agent() {
+				transitions.push(next_lw_trans.clone());
+				lw_trans = next_lw_trans;
+			}
+			self.phase = Phase::WaitingForAnimationsToFinish(transitions);
+		}
 	}
 }
 
 impl EventHandler for Game {
 	fn update(&mut self, _ctx: &mut Context) -> GameResult {
+		let no_more_animations = !self.gw.has_animation();
+		if no_more_animations {
+			if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
+				if next_tranitions.is_empty() {
+					self.phase = Phase::WaitingForPlayerToMakeAMove;
+				} else {
+					let lw_trans = next_tranitions.remove(0);
+					self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
+					self.current_lw = lw_trans.resulting_lw.clone();
+				}
+			}
+		}
 		Ok(())
 	}
 
