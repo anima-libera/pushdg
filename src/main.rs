@@ -67,6 +67,14 @@ mod gameplay {
 			}
 		}
 
+		fn is_enemy(&self) -> bool {
+			#[allow(clippy::single_match)]
+			match self {
+				Obj::Slime { .. } => true,
+				_ => false,
+			}
+		}
+
 		fn give_move_token(&mut self) {
 			#[allow(clippy::single_match)]
 			match self {
@@ -140,15 +148,15 @@ mod gameplay {
 			lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5 }));
 			lw.place_tile(
 				IVec2::new(2, 0),
-				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+				Tile::obj(Obj::Slime { hp: 5, move_token: false }),
 			);
 			lw.place_tile(
 				IVec2::new(3, 1),
-				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+				Tile::obj(Obj::Slime { hp: 5, move_token: false }),
 			);
 			lw.place_tile(
 				IVec2::new(3, -1),
-				Tile::obj(Obj::Slime { hp: 3, move_token: false }),
+				Tile::obj(Obj::Slime { hp: 5, move_token: false }),
 			);
 			lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
 			lw
@@ -202,7 +210,7 @@ mod gameplay {
 		fn ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
 			// Test simple AI.
 			let target_coords = self.player_coords().unwrap();
-			if agent_coords.x == target_coords.x {
+			let mut direction_opt = if agent_coords.x == target_coords.x {
 				if target_coords.y < agent_coords.y {
 					Some(IVec2::new(0, -1))
 				} else {
@@ -216,7 +224,18 @@ mod gameplay {
 				}
 			} else {
 				None
+			};
+			if let Some(direction) = direction_opt {
+				let dst = agent_coords + direction;
+				if self
+					.grid
+					.get(&dst)
+					.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| obj.is_enemy()))
+				{
+					direction_opt = None;
+				}
 			}
+			direction_opt
 		}
 
 		fn is_hit_killing(&self, weapon_coords: IVec2, direction: IVec2) -> HitAttemptConsequences {
