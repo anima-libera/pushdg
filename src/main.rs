@@ -68,11 +68,7 @@ mod gameplay {
 		}
 
 		fn is_enemy(&self) -> bool {
-			#[allow(clippy::single_match)]
-			match self {
-				Obj::Slime { .. } => true,
-				_ => false,
-			}
+			matches!(self, Obj::Slime { .. })
 		}
 
 		fn give_move_token(&mut self) {
