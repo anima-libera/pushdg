@@ -14,6 +14,7 @@ You don't have a sword or a shield in your inventory. You don't have an inventor
 - Graphics, 8x8 sprites, animations, damage numbers.
 - Camera, follows the player smoothly.
 - Some very basic, dirty and messy procedural level generation.
+- Visibility, must have line of sight and be close enough to see a tile.
 
 ## Guide
 

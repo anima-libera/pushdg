@@ -10,6 +10,8 @@ use std::collections::{hash_map::Entry, HashMap};
 use ggez::glam::IVec2;
 use rand::seq::SliceRandom;
 
+use crate::generation::filled_rect;
+
 /// A tile can have zero or one object on it, and these can be moved.
 #[derive(Clone)]
 pub enum Obj {
@@ -19,6 +21,8 @@ pub enum Obj {
 	Sword,
 	/// Does zero damages. Great for protection, terrible weapon.
 	Shield,
+	/// Can mine walls.
+	Pickaxe,
 	/// The average pushable object, has the default stat for every stat.
 	Rock,
 	/// The player. We play as a bunny. It is cute! :3
@@ -256,11 +260,29 @@ impl LogicalWorld {
 		self
 	}
 
+	/// There are walls everywhere, we apply that design choice here.
+	fn generated_walls_outside(mut self) -> LogicalWorld {
+		let keys: Vec<_> = self.grid.keys().copied().collect();
+		for coords in keys {
+			if self.grid.get(&coords).is_some_and(|tile| {
+				tile.obj.is_none() || tile.obj.as_ref().is_some_and(|obj| !matches!(obj, Obj::Wall))
+			}) {
+				for coords in filled_rect(coords - IVec2::new(1, 1), IVec2::new(3, 3)) {
+					self.place_tile_no_overwrite(coords, Tile::obj(Obj::Wall));
+				}
+			}
+		}
+		self
+	}
+
 	/// Returns the transition of the player trying to move in the given direction.
 	pub fn player_move(&self, direction: IVec2) -> LogicalTransition {
 		if let Some(coords) = self.player_coords() {
 			let player_force = 2;
-			self.try_to_move(coords, direction, player_force).updated_visibility()
+			self
+				.try_to_move(coords, direction, player_force)
+				.updated_visibility()
+				.generated_walls_outside()
 		} else {
 			LogicalTransition { resulting_lw: self.clone(), logical_events: vec![] }
 		}
@@ -339,7 +361,9 @@ impl LogicalWorld {
 		let weapon_obj = self.grid.get(&weapon_coords).as_ref().unwrap().obj.as_ref().unwrap();
 		let target_coords = weapon_coords + direction;
 		if let Some(target_obj) = self.grid.get(&target_coords).as_ref().unwrap().obj.as_ref() {
-			if let Some(target_hp) = target_obj.hp() {
+			if matches!((weapon_obj, target_obj), (Obj::Pickaxe, Obj::Wall)) {
+				HitAttemptConsequences::Mine
+			} else if let Some(target_hp) = target_obj.hp() {
 				let damages = weapon_obj.damages();
 				if target_hp <= damages {
 					// HP would drop to zero or less.
@@ -380,14 +404,14 @@ impl LogicalWorld {
 						// if not for the target would now hit the target.
 						final_hit = self.what_would_happen_if_hit(coords - direction, direction);
 						break match final_hit {
-							HitAttemptConsequences::Kill { .. } => {
+							HitAttemptConsequences::Mine | HitAttemptConsequences::Kill { .. } => {
 								// The target is killed, and as a design choice I find it cool
 								// that since now what was blocking is no more then the push
 								// happens now.
 								true
 							},
-							HitAttemptConsequences::NonLethalHit { .. } => false,
-							HitAttemptConsequences::TargetIsNotHittable => false,
+							HitAttemptConsequences::NonLethalHit { .. }
+							| HitAttemptConsequences::TargetIsNotHittable => false,
 							HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
 						};
 					}
@@ -442,12 +466,11 @@ impl LogicalWorld {
 					// The hit kills the blocking object, allowing the push to succeed
 					// and the last object of the push chain to take the place of the target.
 					let target_obj = previous_obj.take().unwrap();
-					logical_events.push(LogicalEvent::Killed {
-						obj: target_obj,
-						at: coords,
-						hit_direction: direction,
-						damages,
-					});
+					logical_events.push(LogicalEvent::Killed { obj: target_obj, at: coords, damages });
+				},
+				HitAttemptConsequences::Mine => {
+					let target_obj = previous_obj.take().unwrap();
+					logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
 				},
 				HitAttemptConsequences::NonLethalHit { .. }
 				| HitAttemptConsequences::TargetIsNotHittable => {
@@ -463,14 +486,12 @@ impl LogicalWorld {
 				HitAttemptConsequences::NonLethalHit { damages } => {
 					let target_obj = res_lw.grid.get_mut(&coords).unwrap().obj.as_mut().unwrap();
 					target_obj.take_damage(damages);
-					logical_events.push(LogicalEvent::Hit {
-						at: coords,
-						hit_direction: direction,
-						damages,
-					});
+					logical_events.push(LogicalEvent::Hit { at: coords, damages });
 				},
 				HitAttemptConsequences::TargetIsNotHittable => {},
-				HitAttemptConsequences::Kill { .. } | HitAttemptConsequences::ThereIsNoTraget => {
+				HitAttemptConsequences::Kill { .. }
+				| HitAttemptConsequences::Mine
+				| HitAttemptConsequences::ThereIsNoTraget => {
 					unreachable!(
 						"If there is no or no more target, \
 						then nothing is blocking the push from succeeding"
@@ -495,6 +516,8 @@ enum HitAttemptConsequences {
 		/// even if higher than the remaining HP of the killed target.
 		damages: i32,
 	},
+	/// Pickaxe mining a wall for example.
+	Mine,
 }
 
 struct MoveAttemptConsequences {
@@ -512,25 +535,11 @@ struct MoveAttemptConsequences {
 /// can be useful to animate the transition.
 #[derive(Clone)]
 pub enum LogicalEvent {
-	Move {
-		from: IVec2,
-		to: IVec2,
-	},
-	FailToMove {
-		from: IVec2,
-		to: IVec2,
-	},
-	Hit {
-		at: IVec2,
-		hit_direction: IVec2,
-		damages: i32,
-	},
-	Killed {
-		obj: Obj,
-		at: IVec2,
-		hit_direction: IVec2,
-		damages: i32,
-	},
+	Move { from: IVec2, to: IVec2 },
+	FailToMove { from: IVec2, to: IVec2 },
+	Hit { at: IVec2, damages: i32 },
+	Killed { obj: Obj, at: IVec2, damages: i32 },
+	Mined { obj: Obj, at: IVec2 },
 }
 
 /// When the player or agents move or something happens in the game,
@@ -549,6 +558,13 @@ impl LogicalTransition {
 	pub fn updated_visibility(self) -> LogicalTransition {
 		LogicalTransition {
 			resulting_lw: self.resulting_lw.updated_visibility(),
+			logical_events: self.logical_events,
+		}
+	}
+
+	pub fn generated_walls_outside(self) -> LogicalTransition {
+		LogicalTransition {
+			resulting_lw: self.resulting_lw.generated_walls_outside(),
 			logical_events: self.logical_events,
 		}
 	}

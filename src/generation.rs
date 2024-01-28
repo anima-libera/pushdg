@@ -5,7 +5,7 @@ use rand::{thread_rng, Rng};
 
 use crate::gameplay::{LogicalWorld, Obj, Tile};
 
-fn filled_rect(top_left: IVec2, dimensions: IVec2) -> Vec<IVec2> {
+pub fn filled_rect(top_left: IVec2, dimensions: IVec2) -> Vec<IVec2> {
 	let mut vec = vec![];
 	for y in top_left.y..(top_left.y + dimensions.y) {
 		for x in top_left.x..(top_left.x + dimensions.x) {
@@ -87,6 +87,7 @@ impl Generator {
 				(5, Some(Obj::Rock)),
 				(1, Some(Obj::Sword)),
 				(1, Some(Obj::Shield)),
+				(1, Some(Obj::Pickaxe)),
 				(5, Some(Obj::Slime { hp: 5, move_token: false })),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
