@@ -47,7 +47,7 @@ impl Generator {
 	fn generate_corridor(&mut self, start: IVec2, direction: IVec2, length: i32, width: i32) {
 		let mut coords = start;
 		for _ in 0..length {
-			let one_wall = coords + direction.perp() * (width / 2 + 1);
+			let one_wall = coords + direction.perp();
 			self.lw.place_tile_no_overwrite(one_wall, Tile::obj(Obj::Wall));
 			self.lw.place_tile_no_overwrite(
 				one_wall - direction.perp() * (width + 1),
@@ -75,7 +75,7 @@ impl Generator {
 			// Room dimensions.
 			let up = thread_rng().gen_range(1..=5) + 2;
 			let down = thread_rng().gen_range(1..=5) + 2;
-			let right = thread_rng().gen_range(1..=8) + 2;
+			let right = thread_rng().gen_range(2..=8) + 2;
 			let top_left = IVec2::new(room_x, entry_y - up);
 			let dimensions = IVec2::new(right, up + 1 + down);
 			self.generate_empty_room(top_left, dimensions);
@@ -118,7 +118,7 @@ impl Generator {
 				corridor_length,
 				2,
 			);
-			room_x = exit_x + corridor_length;
+			room_x = exit_x + corridor_length - 1;
 			entry_y = exit_y;
 		}
 	}

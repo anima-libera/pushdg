@@ -142,40 +142,6 @@ impl LogicalWorld {
 		LogicalWorld { grid: HashMap::new() }
 	}
 
-	pub fn new_test() -> LogicalWorld {
-		let mut lw = LogicalWorld::new_empty();
-		let r = 5;
-		for y in (-r)..=r {
-			for x in (-r)..=r {
-				lw.place_tile(IVec2::new(x, y), Tile::obj(Obj::Wall));
-			}
-		}
-		let r = r - 1;
-		for y in (-r)..=r {
-			for x in (-r)..=r {
-				lw.place_tile(IVec2::new(x, y), Tile::floor());
-			}
-		}
-		lw.place_tile(IVec2::new(-3, 0), Tile::obj(Obj::Sword));
-		lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Rock));
-		lw.place_tile(IVec2::new(-1, 0), Tile::obj(Obj::Shield));
-		lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5 }));
-		lw.place_tile(
-			IVec2::new(2, 0),
-			Tile::obj(Obj::Slime { hp: 5, move_token: false }),
-		);
-		lw.place_tile(
-			IVec2::new(3, 1),
-			Tile::obj(Obj::Slime { hp: 5, move_token: false }),
-		);
-		lw.place_tile(
-			IVec2::new(3, -1),
-			Tile::obj(Obj::Slime { hp: 5, move_token: false }),
-		);
-		lw.place_tile(IVec2::new(3, 0), Tile::obj(Obj::Wall));
-		lw
-	}
-
 	pub fn place_tile(&mut self, coords: IVec2, tile: Tile) {
 		self.grid.insert(coords, tile);
 	}
