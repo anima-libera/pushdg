@@ -118,11 +118,12 @@ impl DisplayedSprite {
 /// but the logical nature of things is lost to sprites, it is a render in a sense.
 pub struct GraphicalWorld {
 	sprites: Vec<DisplayedSprite>,
+	pub info_for_camera: InfoForCamera,
 }
 
 impl GraphicalWorld {
 	pub fn new() -> GraphicalWorld {
-		GraphicalWorld { sprites: vec![] }
+		GraphicalWorld { sprites: vec![], info_for_camera: InfoForCamera::new() }
 	}
 
 	pub fn from_logical_world(lw: &LogicalWorld) -> GraphicalWorld {
@@ -164,6 +165,9 @@ impl GraphicalWorld {
 					Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 					Obj::Slime { .. } => SpriteFromSheet::Slime,
 				};
+				if matches!(obj, Obj::Bunny { .. }) {
+					gw.info_for_camera.player_position = Some(coords.as_vec2());
+				}
 				// If the object is mentioned by a logical event of the transition,
 				// then it may be animated to represent that event happening.
 				let move_animation =
@@ -237,6 +241,7 @@ impl GraphicalWorld {
 		_ctx: &mut Context,
 		canvas: &mut Canvas,
 		spritesheet_stuff: &SpritesheetStuff,
+		camera: &Camera,
 	) -> GameResult {
 		let sprite_px_scaled_to_how_many_screen_px = 7.0;
 		let sprite_size_px = 8.0 * sprite_px_scaled_to_how_many_screen_px;
@@ -245,7 +250,7 @@ impl GraphicalWorld {
 				continue;
 			}
 			let center = sprite.center();
-			let top_left = center * sprite_size_px - Vec2::new(1.0, 1.0) * sprite_size_px / 2.0;
+			let top_left = (center - camera.current_position) * sprite_size_px;
 			let top_left = top_left + Vec2::new(400.0, 400.0);
 			let plain_color = sprite.plain_color();
 			let (spritesheet, color) = if let Some(color) = plain_color {
@@ -407,5 +412,47 @@ impl TemporaryTextAnimation {
 
 	fn current_plain_color(&self) -> Option<Color> {
 		Some(self.color)
+	}
+}
+
+/// Info about the logical or graphical world that can help the camera set its target.
+pub struct InfoForCamera {
+	player_position: Option<Vec2>,
+}
+
+impl InfoForCamera {
+	fn new() -> InfoForCamera {
+		InfoForCamera { player_position: None }
+	}
+}
+
+/// Points to a position in the world that ends up displayed at the center of the window.
+/// When the target moves (even abruptly), the camera follows smoothly.
+pub struct Camera {
+	target_position: Vec2,
+	current_position: Vec2,
+}
+
+impl Camera {
+	pub fn new() -> Camera {
+		Camera {
+			target_position: Vec2::new(0.0, 0.0),
+			current_position: Vec2::new(0.0, 0.0),
+		}
+	}
+
+	/// Make the camera move towards the target, smoothly. Expected to be called once per frame.
+	pub fn animate(&mut self, frame_dt: Duration) {
+		let speed = 4.0;
+		let update_factor = (speed * frame_dt.as_secs_f32()).min(1.0);
+		self.current_position =
+			self.current_position * (1.0 - update_factor) + self.target_position * update_factor;
+	}
+
+	/// Sets the target on some new world state via some info about that state.
+	pub fn set_target(&mut self, info: &InfoForCamera) {
+		if let Some(player_position) = info.player_position {
+			self.target_position = player_position;
+		}
 	}
 }

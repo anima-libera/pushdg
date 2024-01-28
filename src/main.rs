@@ -12,7 +12,7 @@ use ggez::{
 	winit::event::VirtualKeyCode,
 	Context, ContextBuilder, GameResult,
 };
-use graphics::GraphicalWorld;
+use graphics::{Camera, GraphicalWorld};
 use spritesheet::SpritesheetStuff;
 
 enum Phase {
@@ -30,6 +30,7 @@ struct Game {
 	logical_world: LogicalWorld,
 	phase: Phase,
 	graphical_world: GraphicalWorld,
+	camera: Camera,
 	spritesheet_stuff: SpritesheetStuff,
 }
 
@@ -39,7 +40,14 @@ impl Game {
 		let gw = GraphicalWorld::from_logical_world(&lw);
 		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
 		let phase = Phase::WaitingForPlayerToMakeAMove;
-		Ok(Game { logical_world: lw, phase, graphical_world: gw, spritesheet_stuff })
+		let camera = Camera::new();
+		Ok(Game {
+			logical_world: lw,
+			phase,
+			graphical_world: gw,
+			camera,
+			spritesheet_stuff,
+		})
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
@@ -61,7 +69,7 @@ impl Game {
 }
 
 impl EventHandler for Game {
-	fn update(&mut self, _ctx: &mut Context) -> GameResult {
+	fn update(&mut self, ctx: &mut Context) -> GameResult {
 		let no_more_animations = !self.graphical_world.has_animation();
 		if no_more_animations {
 			if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
@@ -69,11 +77,15 @@ impl EventHandler for Game {
 					let transition = next_tranitions.remove(0);
 					self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
 					self.logical_world = transition.resulting_lw.clone();
+					self.camera.set_target(&self.graphical_world.info_for_camera);
 				} else {
 					self.phase = Phase::WaitingForPlayerToMakeAMove;
 				}
 			}
 		}
+
+		self.camera.animate(ctx.time.delta());
+
 		Ok(())
 	}
 
@@ -95,7 +107,7 @@ impl EventHandler for Game {
 	fn draw(&mut self, ctx: &mut Context) -> GameResult {
 		let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
 		canvas.set_sampler(Sampler::nearest_clamp());
-		self.graphical_world.draw(ctx, &mut canvas, &self.spritesheet_stuff)?;
+		self.graphical_world.draw(ctx, &mut canvas, &self.spritesheet_stuff, &self.camera)?;
 		canvas.finish(ctx)?;
 		Ok(())
 	}
