@@ -5,7 +5,7 @@
 //! it is rather used to produce state transitions that contain logical descriptions
 //! of what happen. These are used to animate the rendering of the state.
 
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use ggez::glam::IVec2;
 use rand::seq::SliceRandom;
@@ -122,10 +122,10 @@ pub struct Tile {
 }
 
 impl Tile {
-	fn floor() -> Tile {
+	pub fn floor() -> Tile {
 		Tile { ground: Ground::Floor, obj: None, visible: false }
 	}
-	fn obj(obj: Obj) -> Tile {
+	pub fn obj(obj: Obj) -> Tile {
 		Tile { ground: Ground::Floor, obj: Some(obj), visible: false }
 	}
 }
@@ -176,8 +176,13 @@ impl LogicalWorld {
 		lw
 	}
 
-	fn place_tile(&mut self, coords: IVec2, tile: Tile) {
+	pub fn place_tile(&mut self, coords: IVec2, tile: Tile) {
 		self.grid.insert(coords, tile);
+	}
+	pub fn place_tile_no_overwrite(&mut self, coords: IVec2, tile: Tile) {
+		if let Entry::Vacant(vacant) = self.grid.entry(coords) {
+			vacant.insert(tile);
+		}
 	}
 
 	pub fn tiles(&self) -> impl Iterator<Item = (IVec2, &Tile)> {

@@ -1,8 +1,10 @@
 mod gameplay;
+mod generation;
 mod graphics;
 mod spritesheet;
 
 use gameplay::{LogicalTransition, LogicalWorld};
+use generation::generate_level;
 use ggez::{
 	conf::{WindowMode, WindowSetup},
 	event::{run, EventHandler},
@@ -36,7 +38,7 @@ struct Game {
 
 impl Game {
 	fn new(ctx: &mut Context) -> GameResult<Game> {
-		let lw = LogicalWorld::new_test();
+		let lw = generate_level();
 		let gw = GraphicalWorld::from_logical_world(&lw);
 		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
 		let phase = Phase::WaitingForPlayerToMakeAMove;
