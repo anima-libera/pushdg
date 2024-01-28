@@ -161,11 +161,24 @@ impl LogicalWorld {
 		})
 	}
 
+	fn updated_visibility(mut self) -> LogicalWorld {
+		let player_coords = self.player_coords();
+		for (coords, tile) in self.grid.iter_mut() {
+			tile.visible = if let Some(player_coords) = player_coords {
+				let dist = player_coords.as_vec2().distance(coords.as_vec2());
+				dist <= 6.5
+			} else {
+				true
+			};
+		}
+		self
+	}
+
 	/// Returns the transition of the player trying to move in the given direction.
 	pub fn player_move(&self, direction: IVec2) -> LogicalTransition {
 		if let Some(coords) = self.player_coords() {
 			let player_force = 2;
-			self.try_to_move(coords, direction, player_force)
+			self.try_to_move(coords, direction, player_force).updated_visibility()
 		} else {
 			LogicalTransition { resulting_lw: self.clone(), logical_events: vec![] }
 		}
@@ -194,7 +207,7 @@ impl LogicalWorld {
 					res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
 					return Some(if let Some(direction) = self.ai_decision(*coords) {
 						let argent_force = 2;
-						res_lw.try_to_move(*coords, direction, argent_force)
+						res_lw.try_to_move(*coords, direction, argent_force).updated_visibility()
 					} else {
 						LogicalTransition { resulting_lw: res_lw, logical_events: vec![] }
 					});
@@ -448,4 +461,13 @@ pub enum LogicalEvent {
 pub struct LogicalTransition {
 	pub logical_events: Vec<LogicalEvent>,
 	pub resulting_lw: LogicalWorld,
+}
+
+impl LogicalTransition {
+	pub fn updated_visibility(self) -> LogicalTransition {
+		LogicalTransition {
+			resulting_lw: self.resulting_lw.updated_visibility(),
+			logical_events: self.logical_events,
+		}
+	}
 }

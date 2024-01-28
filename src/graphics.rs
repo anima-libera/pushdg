@@ -127,7 +127,8 @@ impl GraphicalWorld {
 	}
 
 	pub fn from_logical_world(lw: &LogicalWorld) -> GraphicalWorld {
-		let transition = LogicalTransition { resulting_lw: lw.clone(), logical_events: vec![] };
+		let transition = LogicalTransition { resulting_lw: lw.clone(), logical_events: vec![] }
+			.updated_visibility();
 		GraphicalWorld::from_logical_world_transition(&transition)
 	}
 
@@ -143,6 +144,9 @@ impl GraphicalWorld {
 		let mut gw = GraphicalWorld::new();
 		// We iterate over all the tiles, creating sprites to represent their content.
 		for (coords, tile) in transition.resulting_lw.tiles() {
+			if !tile.visible {
+				continue;
+			}
 			// Ground.
 			if matches!(tile.ground, Ground::Floor) {
 				gw.add_sprite(DisplayedSprite::new(
