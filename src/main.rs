@@ -1,4 +1,4 @@
-use gameplay::{LogicalWorld, LogicalWorldTransition};
+use gameplay::{LogicalTransition, LogicalWorld};
 use ggez::{
 	conf::{WindowMode, WindowSetup},
 	event::{run, EventHandler},
@@ -15,24 +15,41 @@ mod gameplay {
 	use std::collections::HashMap;
 
 	use ggez::glam::IVec2;
+	use rand::seq::SliceRandom;
 
+	/// Every tile has a ground, below the potential object. The ground does not move.
 	#[derive(Clone)]
 	pub enum Ground {
+		/// The classic ground, nothing special.
 		Floor,
-		// TODO: Hole
+		// TODO: Hole, Ice, FragileFloor
 	}
 
+	/// A tile can have zero or one object on it, and these can be moved.
 	#[derive(Clone)]
 	pub enum Obj {
+		/// Hard to move, it just stays there, being a wall.
 		Wall,
+		/// Does more damages. Great weapon, terrible for protection.
 		Sword,
+		/// Does zero damages. Great for protection, terrible weapon.
 		Shield,
+		/// The average pushable object, has the default stat for every stat.
 		Rock,
+		/// The player. We play as a bunny. It is cute! :3
 		Bunny { hp: i32 },
-		Slime { hp: i32, move_token: bool },
+		/// The basic enemy.
+		Slime {
+			hp: i32,
+			/// This token indicates that this agent has yet to make a move.
+			move_token: bool,
+		},
 	}
 
 	impl Obj {
+		/// When a pusher wants to push one or more objects, the sum of the masses of the
+		/// objects that may be pushed is compared to the force of the pusher to see if the
+		/// pusher succeeds to push (force >= total mass) or fails to push (force < total mass).
 		fn mass(&self) -> i32 {
 			match self {
 				Obj::Wall => 10,
@@ -42,6 +59,8 @@ mod gameplay {
 			}
 		}
 
+		/// When an object W is failed to be pushed into an object T, W may deal damages to T
+		/// if T is the kind of object that may take damages.
 		fn damages(&self) -> i32 {
 			match self {
 				Obj::Sword => 3,
@@ -51,6 +70,7 @@ mod gameplay {
 			}
 		}
 
+		/// An object may take damages if it has some HP.
 		fn hp(&self) -> Option<i32> {
 			match self {
 				Obj::Bunny { hp } => Some(*hp),
@@ -59,6 +79,8 @@ mod gameplay {
 			}
 		}
 
+		/// Doesn't check if HP goes down to zero or lower,
+		/// killing hits should be handled by hand.
 		fn take_damage(&mut self, damages: i32) {
 			match self {
 				Obj::Bunny { hp } => *hp -= damages,
@@ -67,6 +89,7 @@ mod gameplay {
 			}
 		}
 
+		/// Some agents may be neutral, this only flags agents that are hostile to the player.
 		fn is_enemy(&self) -> bool {
 			matches!(self, Obj::Slime { .. })
 		}
@@ -114,6 +137,8 @@ mod gameplay {
 		}
 	}
 
+	/// A logical state of the world, with no regards to rendering or animation.
+	/// The world is a grid of tiles.
 	#[derive(Clone)]
 	pub struct LogicalWorld {
 		grid: HashMap<IVec2, Tile>,
@@ -172,12 +197,18 @@ mod gameplay {
 			})
 		}
 
-		pub fn player_move(&self, direction: IVec2) -> LogicalWorldTransition {
-			let coords = self.player_coords().unwrap();
-			let player_force = 2;
-			self.try_to_move(coords, direction, player_force)
+		/// Returns the transition of the player trying to move in the given direction.
+		pub fn player_move(&self, direction: IVec2) -> LogicalTransition {
+			if let Some(coords) = self.player_coords() {
+				let player_force = 2;
+				self.try_to_move(coords, direction, player_force)
+			} else {
+				LogicalTransition { resulting_lw: self.clone(), logical_events: vec![] }
+			}
 		}
 
+		/// When it is the game's turn to play, agents are given one move token
+		/// so that one agent doesn't get to move twice.
 		pub fn give_move_token_to_agents(&mut self) {
 			for tile in self.grid.values_mut() {
 				if let Some(obj) = tile.obj.as_mut() {
@@ -186,16 +217,22 @@ mod gameplay {
 			}
 		}
 
-		pub fn handle_move_for_one_agent(&mut self) -> Option<LogicalWorldTransition> {
-			for (coords, tile) in self.grid.iter() {
+		/// If there are still agents that can move,
+		/// then returns the transition of one trying to move, chosen randomly.
+		pub fn handle_move_for_one_agent(&mut self) -> Option<LogicalTransition> {
+			let mut keys: Vec<_> = self.grid.keys().collect();
+			keys.shuffle(&mut rand::thread_rng());
+			for coords in keys.into_iter() {
+				let tile = self.grid.get(coords).unwrap();
 				if let Some(obj) = tile.obj.as_ref() {
 					if obj.has_move_token() {
 						let mut res_lw = self.clone();
 						res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
 						return Some(if let Some(direction) = self.ai_decision(*coords) {
-							res_lw.try_to_move(*coords, direction, 2)
+							let argent_force = 2;
+							res_lw.try_to_move(*coords, direction, argent_force)
 						} else {
-							LogicalWorldTransition { resulting_lw: res_lw, logical_events: vec![] }
+							LogicalTransition { resulting_lw: res_lw, logical_events: vec![] }
 						});
 					}
 				}
@@ -203,44 +240,53 @@ mod gameplay {
 			None
 		}
 
+		/// Test simple AI.
 		fn ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
-			// Test simple AI.
-			let target_coords = self.player_coords().unwrap();
-			let mut direction_opt = if agent_coords.x == target_coords.x {
+			let target_coords = self.player_coords()?;
+			// Move towards the target if it is in a streaight line.
+			let direction = if agent_coords.x == target_coords.x {
 				if target_coords.y < agent_coords.y {
-					Some(IVec2::new(0, -1))
+					IVec2::new(0, -1)
 				} else {
-					Some(IVec2::new(0, 1))
+					IVec2::new(0, 1)
 				}
 			} else if agent_coords.y == target_coords.y {
 				if target_coords.x < agent_coords.x {
-					Some(IVec2::new(-1, 0))
+					IVec2::new(-1, 0)
 				} else {
-					Some(IVec2::new(1, 0))
+					IVec2::new(1, 0)
 				}
 			} else {
-				None
+				return None;
 			};
-			if let Some(direction) = direction_opt {
-				let dst = agent_coords + direction;
-				if self
-					.grid
-					.get(&dst)
-					.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| obj.is_enemy()))
-				{
-					direction_opt = None;
-				}
+			// Avoid bumping into an other enemy, it may help the player.
+			let dst = agent_coords + direction;
+			if self
+				.grid
+				.get(&dst)
+				.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| obj.is_enemy()))
+			{
+				return None;
 			}
-			direction_opt
+			Some(direction)
 		}
 
-		fn is_hit_killing(&self, weapon_coords: IVec2, direction: IVec2) -> HitAttemptConsequences {
+		/// In the case of an object W at `weapon_coords` hitting an object T
+		/// as it tries to move in the given `direction`, a hit may occur, and it may be a killing
+		/// hit, depending on hittability of T, the damages of W, the remaining HP of T.
+		/// This returns what would happen, would the hit occur.
+		fn what_would_happen_if_hit(
+			&self,
+			weapon_coords: IVec2,
+			direction: IVec2,
+		) -> HitAttemptConsequences {
 			let weapon_obj = self.grid.get(&weapon_coords).as_ref().unwrap().obj.as_ref().unwrap();
 			let target_coords = weapon_coords + direction;
 			if let Some(target_obj) = self.grid.get(&target_coords).as_ref().unwrap().obj.as_ref() {
 				if let Some(target_hp) = target_obj.hp() {
 					let damages = weapon_obj.damages();
-					if weapon_obj.damages() >= target_hp {
+					if target_hp <= damages {
+						// HP would drop to zero or less.
 						HitAttemptConsequences::Kill { damages }
 					} else {
 						HitAttemptConsequences::NonLethalHit { damages }
@@ -253,14 +299,17 @@ mod gameplay {
 			}
 		}
 
-		/// Returns also the number of objects that do move or that fail to move.
-		fn is_move_possible(
+		/// When an object tries to move in some direction, depending on a lot of factors
+		/// like the force of the object, what may block its path, then a push or even a hit
+		/// could succeed, fail, implicate some amount of objects, etc.
+		/// This returns what would happen.
+		fn what_would_happen_if_try_to_move(
 			&self,
-			pusher_coords: IVec2,
+			mover_coords: IVec2,
 			direction: IVec2,
 			force: i32,
 		) -> MoveAttemptConsequences {
-			let mut coords = pusher_coords;
+			let mut coords = mover_coords;
 			let mut remaining_force = force;
 			let mut length = 0;
 			let mut final_hit = HitAttemptConsequences::ThereIsNoTraget;
@@ -271,9 +320,16 @@ mod gameplay {
 					if let Some(dst_obj) = dst_tile.obj.as_ref() {
 						remaining_force -= dst_obj.mass();
 						if remaining_force < 0 {
-							final_hit = self.is_hit_killing(coords - direction, direction);
+							// The final object of the chain that would have been pushed if the push
+							// if not for the target would now hit the target.
+							final_hit = self.what_would_happen_if_hit(coords - direction, direction);
 							break match final_hit {
-								HitAttemptConsequences::Kill { .. } => true,
+								HitAttemptConsequences::Kill { .. } => {
+									// The target is killed, and as a design choice I find it cool
+									// that since now what was blocking is no more then the push
+									// happens now.
+									true
+								},
 								HitAttemptConsequences::NonLethalHit { .. } => false,
 								HitAttemptConsequences::TargetIsNotHittable => false,
 								HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
@@ -289,41 +345,43 @@ mod gameplay {
 			MoveAttemptConsequences { success, length, final_hit }
 		}
 
+		/// Returns the transition of the object at the given coords trying to move
+		/// in the given direction and with the given force.
 		fn try_to_move(
 			&self,
-			pusher_coords: IVec2,
+			mover_coords: IVec2,
 			direction: IVec2,
 			force: i32,
-		) -> LogicalWorldTransition {
+		) -> LogicalTransition {
 			let mut res_lw = self.clone();
 			let mut logical_events = vec![];
 			let MoveAttemptConsequences { success, length, final_hit } =
-				self.is_move_possible(pusher_coords, direction, force);
-			let mut coords = pusher_coords;
+				self.what_would_happen_if_try_to_move(mover_coords, direction, force);
+			let mut coords = mover_coords;
 			let mut previous_obj = None;
 			for _ in 0..length {
 				if success {
+					// The push is successful so each object in the chain is replaced
+					// by the previous object, and gets to replace the next object.
 					std::mem::swap(
 						&mut previous_obj,
 						&mut res_lw.grid.get_mut(&coords).unwrap().obj,
 					);
-					if let Some(obj) = previous_obj.as_ref() {
-						logical_events.push(LogicalEvent::Move {
-							obj: obj.clone(),
-							from: coords,
-							to: coords + direction,
-						});
+					if previous_obj.is_some() {
+						logical_events.push(LogicalEvent::Move { from: coords, to: coords + direction });
 					}
 				} else {
-					let obj = res_lw.grid.get(&coords).as_ref().unwrap().obj.as_ref().unwrap().clone();
-					logical_events.push(LogicalEvent::FailToMove {
-						obj,
-						from: coords,
-						to: coords + direction,
-					});
+					// The push is not successful, but the objects that fail to move still
+					// has to fail to move (important because it ultimately results in an
+					// animation that displays the objects failing to move, and also
+					// which objects fail to move and which are not even concerned).
+					logical_events
+						.push(LogicalEvent::FailToMove { from: coords, to: coords + direction });
 				}
 				coords += direction;
 			}
+			// We are at the end of the push chain. There may be a hit happening there,
+			// with the last object moving or failing to move hitting what comes after.
 			if success {
 				std::mem::swap(
 					&mut previous_obj,
@@ -331,6 +389,8 @@ mod gameplay {
 				);
 				match final_hit {
 					HitAttemptConsequences::Kill { damages } => {
+						// The hit kills the blocking object, allowing the push to succeed
+						// and the last object of the push chain to take the place of the target.
 						let target_obj = previous_obj.take().unwrap();
 						logical_events.push(LogicalEvent::Killed {
 							obj: target_obj,
@@ -339,59 +399,78 @@ mod gameplay {
 							damages,
 						});
 					},
-					HitAttemptConsequences::NonLethalHit { .. } => unreachable!(),
-					HitAttemptConsequences::TargetIsNotHittable => {},
+					HitAttemptConsequences::NonLethalHit { .. }
+					| HitAttemptConsequences::TargetIsNotHittable => {
+						unreachable!(
+							"If there is a non-killed target, then the push would have been a failure"
+						)
+					},
 					HitAttemptConsequences::ThereIsNoTraget => assert!(previous_obj.is_none()),
 				}
 				assert!(previous_obj.is_none());
 			} else {
 				match final_hit {
-					HitAttemptConsequences::Kill { .. } => unreachable!(),
 					HitAttemptConsequences::NonLethalHit { damages } => {
 						let target_obj = res_lw.grid.get_mut(&coords).unwrap().obj.as_mut().unwrap();
 						target_obj.take_damage(damages);
 						logical_events.push(LogicalEvent::Hit {
-							obj: target_obj.clone(),
 							at: coords,
 							hit_direction: direction,
 							damages,
 						});
 					},
 					HitAttemptConsequences::TargetIsNotHittable => {},
-					HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
+					HitAttemptConsequences::Kill { .. } | HitAttemptConsequences::ThereIsNoTraget => {
+						unreachable!(
+							"If there is no or no more target, \
+							then nothing is blocking the push from succeeding"
+						)
+					},
 				}
 			}
-			LogicalWorldTransition { resulting_lw: res_lw, logical_events }
+			LogicalTransition { resulting_lw: res_lw, logical_events }
 		}
 	}
 
 	enum HitAttemptConsequences {
 		ThereIsNoTraget,
+		/// Some targets cannot be hit in the sense that they do not have any HP
+		/// and the notion of taking damages does not make sense for them.
 		TargetIsNotHittable,
-		NonLethalHit { damages: i32 },
-		Kill { damages: i32 },
+		NonLethalHit {
+			damages: i32,
+		},
+		Kill {
+			/// The target is killed, but this is still the damages dealt by the weapon,
+			/// even if higher than the remaining HP of the killed target.
+			damages: i32,
+		},
 	}
 
 	struct MoveAttemptConsequences {
+		/// Will some objects actually move or will they just fail to move?
 		success: bool,
+		/// The number of object that move or fail to move.
 		length: i32,
+		/// The frontmost object to move may hit an other object in front of it,
+		/// if a hit happens and its consequences are also consequences of the move.
 		final_hit: HitAttemptConsequences,
 	}
 
+	/// When something happens to turn a logical state of the world into an other,
+	/// then a logical description of what happened (or even what failed to happen)
+	/// can be useful to animate the transition.
 	#[derive(Clone)]
 	pub enum LogicalEvent {
 		Move {
-			obj: Obj,
 			from: IVec2,
 			to: IVec2,
 		},
 		FailToMove {
-			obj: Obj,
 			from: IVec2,
 			to: IVec2,
 		},
 		Hit {
-			obj: Obj,
 			at: IVec2,
 			hit_direction: IVec2,
 			damages: i32,
@@ -404,8 +483,14 @@ mod gameplay {
 		},
 	}
 
+	/// When the player or agents move or something happens in the game,
+	/// it results in a logical transition from a state to an other being produced
+	/// instead of simply mutating the current state.
+	/// This allows for animation to have access to all the events to animate,
+	/// for the game to play all its moves and then the animations to play each of them
+	/// taking some time, for the ai to play in its head and consider world states, etc.
 	#[derive(Clone)]
-	pub struct LogicalWorldTransition {
+	pub struct LogicalTransition {
 		pub logical_events: Vec<LogicalEvent>,
 		pub resulting_lw: LogicalWorld,
 	}
@@ -421,7 +506,7 @@ mod graphics {
 	};
 
 	use crate::{
-		gameplay::{Ground, LogicalEvent, LogicalWorld, LogicalWorldTransition, Obj},
+		gameplay::{Ground, LogicalEvent, LogicalTransition, LogicalWorld, Obj},
 		SpritesheetStuff,
 	};
 
@@ -443,6 +528,7 @@ mod graphics {
 		}
 	}
 
+	/// These refer to a sprite in the spritesheet.
 	enum SpriteFromSheet {
 		Wall,
 		Floor,
@@ -456,11 +542,14 @@ mod graphics {
 
 	impl SpriteFromSheet {
 		fn rect_in_spritesheet(&self) -> Rect {
+			// Wild non-aligned sprites.
 			if let SpriteFromSheet::Digit(digit) = self {
 				let x = digit * 4;
 				let y = 16;
 				return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
 			}
+
+			// Now we handle 8x8 sprites aligned on the 8x8-tiles grid.
 			let (x, y) = match self {
 				SpriteFromSheet::Wall => (0, 0),
 				SpriteFromSheet::Floor => (0, 1),
@@ -469,7 +558,7 @@ mod graphics {
 				SpriteFromSheet::Rock => (3, 0),
 				SpriteFromSheet::Bunny => (4, 0),
 				SpriteFromSheet::Slime => (5, 0),
-				SpriteFromSheet::Digit(_) => unreachable!(),
+				SpriteFromSheet::Digit(_) => unreachable!("Handled above"),
 			};
 			Rect::new(
 				x as f32 * 8.0 / 128.0,
@@ -480,22 +569,30 @@ mod graphics {
 		}
 	}
 
+	/// An animation plays during some time interval, and progresses during said interval.
 	struct TimeInterval {
 		start_time: Instant,
 		duration: Duration,
 	}
 
 	impl TimeInterval {
+		/// Starts now.
 		fn with_duration(duration: Duration) -> TimeInterval {
 			assert!(!duration.is_zero());
 			TimeInterval { start_time: Instant::now(), duration }
 		}
 
+		/// Zero before and at staring time,
+		/// progresses from zero to one linearly during the time interval
+		/// and stays at one at and after the end.
 		fn progress(&self) -> f32 {
 			(self.start_time.elapsed().as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0)
 		}
 	}
 
+	/// A sprites move linearly and then remain at its target position.
+	///
+	/// Can be used on the sprites of objects that move and are pushed.
 	struct MoveAnimation {
 		from: Vec2,
 		to: Vec2,
@@ -516,6 +613,10 @@ mod graphics {
 		}
 	}
 
+	/// A sprites begins to move to its target position, but along the way it changes course
+	/// to go back to its starting position, and remains there.
+	///
+	/// Can be used on the sprites of objects that fail to push.
 	struct FailToMoveAnimation {
 		from: Vec2,
 		to: Vec2,
@@ -532,19 +633,30 @@ mod graphics {
 		}
 
 		fn current_position(&self) -> Vec2 {
-			let how_far = 0.2;
+			// A factor of how far long the way does the course changes
+			// to target the starting position.
+			let how_far = 0.3;
+
 			let animation_progress = self.time_interval.progress();
+			// The real target position of the first half of the animation, the point
+			// at which the course changes.
 			let to = self.to * how_far + self.from * (1.0 - how_far);
 			if animation_progress < 0.5 {
 				let forward_prorgess = animation_progress * 2.0;
+				// In the first half of the animation, it is just a move to the real target position.
 				self.from + forward_prorgess * (to - self.from)
 			} else {
 				let backward_prorgess = animation_progress * 2.0 - 1.0;
+				// In the second half, the strating and target positions are swapped.
 				to + backward_prorgess * (self.from - to)
 			}
 		}
 	}
 
+	/// All the sprite appears plain red for the specified duration.
+	///
+	/// This represents being hit and is used on the sprites of objects
+	/// that take a non-lethal hit.
 	struct HitAnimation {
 		time_interval: TimeInterval,
 	}
@@ -552,7 +664,7 @@ mod graphics {
 	impl HitAnimation {
 		fn new() -> HitAnimation {
 			HitAnimation {
-				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.15)),
 			}
 		}
 
@@ -561,6 +673,11 @@ mod graphics {
 		}
 	}
 
+	/// The sprite moves from and to the specified positions,
+	/// appearing the specified plain color, and then vanishes at the end.
+	///
+	/// This is used on temporary text that appears on the grid, like for example the damage
+	/// numbers of hits that are colored digits going up and then disappearing.
 	struct TemporaryTextAnimation {
 		from: Vec2,
 		to: Vec2,
@@ -574,7 +691,7 @@ mod graphics {
 				from,
 				to,
 				color,
-				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.4)),
+				time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.3)),
 			}
 		}
 
@@ -591,6 +708,7 @@ mod graphics {
 		}
 	}
 
+	/// An instance of a sprite that has a position, depth layer and animations.
 	struct DisplayedSprite {
 		sprite_from_sheet: SpriteFromSheet,
 		center: Vec2,
@@ -666,6 +784,9 @@ mod graphics {
 		}
 	}
 
+	/// The world, as a set of animated sprites, to be displayed.
+	/// It represents a logical world or even a transition to a logical world,
+	/// but the logical nature of things is lost to sprites, it is a render in a sense.
 	pub struct GraphicalWorld {
 		sprites: Vec<DisplayedSprite>,
 	}
@@ -676,17 +797,23 @@ mod graphics {
 		}
 
 		pub fn from_logical_world(lw: &LogicalWorld) -> GraphicalWorld {
-			let lw_trans = LogicalWorldTransition { resulting_lw: lw.clone(), logical_events: vec![] };
-			GraphicalWorld::from_logical_world_transition(&lw_trans)
+			let transition = LogicalTransition { resulting_lw: lw.clone(), logical_events: vec![] };
+			GraphicalWorld::from_logical_world_transition(&transition)
 		}
 
+		/// Are animations still playing, or are they all finished?
 		pub fn has_animation(&self) -> bool {
 			self.sprites.iter().any(|sprite| sprite.has_animation())
 		}
 
-		pub fn from_logical_world_transition(lw_trans: &LogicalWorldTransition) -> GraphicalWorld {
+		/// Renders the transition to a logical world as a graphical world,
+		/// using animations to convey the transition, and making sure that as animations end
+		/// the remaining representation depicts the logical world that results from the transition.
+		pub fn from_logical_world_transition(transition: &LogicalTransition) -> GraphicalWorld {
 			let mut gw = GraphicalWorld::new();
-			for (coords, tile) in lw_trans.resulting_lw.tiles() {
+			// We iterate over all the tiles, creating sprites to represent their content.
+			for (coords, tile) in transition.resulting_lw.tiles() {
+				// Ground.
 				if matches!(tile.ground, Ground::Floor) {
 					gw.add_sprite(DisplayedSprite::new(
 						SpriteFromSheet::Floor,
@@ -698,6 +825,7 @@ mod graphics {
 						None,
 					));
 				}
+				// Object.
 				if let Some(obj) = tile.obj.as_ref() {
 					let sprite_from_sheet = match obj {
 						Obj::Wall => SpriteFromSheet::Wall,
@@ -707,25 +835,29 @@ mod graphics {
 						Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 						Obj::Slime { .. } => SpriteFromSheet::Slime,
 					};
+					// If the object is mentioned by a logical event of the transition,
+					// then it may be animated to represent that event happening.
 					let move_animation =
-						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+						transition.logical_events.iter().find_map(|logical_event| match logical_event {
 							LogicalEvent::Move { from, to, .. } if *to == coords => {
 								Some(MoveAnimation::new(from.as_vec2(), to.as_vec2()))
 							},
 							_ => None,
 						});
 					let fail_to_move_animation =
-						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+						transition.logical_events.iter().find_map(|logical_event| match logical_event {
 							LogicalEvent::FailToMove { from, to, .. } if *from == coords => {
 								Some(FailToMoveAnimation::new(from.as_vec2(), to.as_vec2()))
 							},
 							_ => None,
 						});
-					let hit_animation =
-						lw_trans.logical_events.iter().find_map(|logical_event| match logical_event {
+					let hit_animation = {
+						transition.logical_events.iter().find_map(|logical_event| match logical_event {
 							LogicalEvent::Hit { at, .. } if *at == coords => Some(HitAnimation::new()),
 							_ => None,
-						});
+						})
+						// Note that the damage number that appears and floats away is handled after.
+					};
 					let depth_layer = if move_animation.is_some() || fail_to_move_animation.is_some() {
 						DepthLayer::AnimatedObj
 					} else {
@@ -742,8 +874,9 @@ mod graphics {
 					));
 				}
 			}
-			for logical_event in lw_trans.logical_events.iter() {
+			for logical_event in transition.logical_events.iter() {
 				match logical_event {
+					// When damages are dealt, a damage number shall appear and float away.
 					LogicalEvent::Killed { at, damages, .. } | LogicalEvent::Hit { at, damages, .. } => {
 						gw.add_sprite(DisplayedSprite::new(
 							SpriteFromSheet::Digit(*damages as u8),
@@ -753,7 +886,7 @@ mod graphics {
 							None,
 							None,
 							Some(TemporaryTextAnimation::new(
-								at.as_vec2(),
+								at.as_vec2() + Vec2::new(0.0, -0.5),
 								at.as_vec2() + Vec2::new(0.0, -1.5),
 								Color::RED,
 							)),
@@ -769,13 +902,15 @@ mod graphics {
 			self.sprites.push(displayed_sprite);
 		}
 
+		/// Render the rendering!
 		pub fn draw(
 			&self,
 			_ctx: &mut Context,
 			canvas: &mut Canvas,
 			spritesheet_stuff: &SpritesheetStuff,
 		) -> GameResult {
-			let sprite_size_px = 8.0 * 7.0;
+			let sprite_px_scaled_to_how_many_screen_px = 7.0;
+			let sprite_size_px = 8.0 * sprite_px_scaled_to_how_many_screen_px;
 			for sprite in self.sprites.iter() {
 				if !sprite.visible() {
 					continue;
@@ -785,6 +920,9 @@ mod graphics {
 				let top_left = top_left + Vec2::new(400.0, 400.0);
 				let plain_color = sprite.plain_color();
 				let (spritesheet, color) = if let Some(color) = plain_color {
+					// A plain color shall be multiplied to the sprite, but we want all the sprite
+					// to be exactly of that *plain* color, so we choose a variant of the sprite that
+					// is all white. We find it in the spritesheet that was painted in white.
 					(&spritesheet_stuff.spritesheet_white, color)
 				} else {
 					(&spritesheet_stuff.spritesheet, Color::WHITE)
@@ -822,6 +960,7 @@ impl SpritesheetStuff {
 			image.height(),
 		);
 
+		// Paint the spritesheet in white.
 		image.as_mut_rgba8().unwrap().pixels_mut().for_each(|pixel| {
 			if pixel.0[3] != 0 {
 				pixel.0[0] = 255;
@@ -842,14 +981,20 @@ impl SpritesheetStuff {
 }
 
 enum Phase {
+	/// The player may take their time then make a move.
 	WaitingForPlayerToMakeAMove,
-	WaitingForAnimationsToFinish(Vec<LogicalWorldTransition>),
+	/// Some animations are still playing in `Game::graphical_world`.
+	/// If all animations are finished, then the next transition in the vec here is to
+	/// be applied.
+	WaitingForAnimationsToFinish(Vec<LogicalTransition>),
 }
 
+/// The whole game state.
 struct Game {
-	current_lw: LogicalWorld,
+	/// The current logical state of the world.
+	logical_world: LogicalWorld,
 	phase: Phase,
-	gw: GraphicalWorld,
+	graphical_world: GraphicalWorld,
 	spritesheet_stuff: SpritesheetStuff,
 }
 
@@ -859,21 +1004,21 @@ impl Game {
 		let gw = GraphicalWorld::from_logical_world(&lw);
 		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
 		let phase = Phase::WaitingForPlayerToMakeAMove;
-		Ok(Game { current_lw: lw, phase, gw, spritesheet_stuff })
+		Ok(Game { logical_world: lw, phase, graphical_world: gw, spritesheet_stuff })
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
 		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
-			let mut lw_trans = self.current_lw.player_move(direction);
-			self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
-			self.current_lw = lw_trans.resulting_lw.clone();
+			let mut transition = self.logical_world.player_move(direction);
+			self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
+			self.logical_world = transition.resulting_lw.clone();
 
 			// Play all the moves of everyting that is not a player up until the player's next turn.
-			lw_trans.resulting_lw.give_move_token_to_agents();
+			transition.resulting_lw.give_move_token_to_agents();
 			let mut transitions = vec![];
-			while let Some(next_lw_trans) = lw_trans.resulting_lw.handle_move_for_one_agent() {
-				transitions.push(next_lw_trans.clone());
-				lw_trans = next_lw_trans;
+			while let Some(next_transition) = transition.resulting_lw.handle_move_for_one_agent() {
+				transitions.push(next_transition.clone());
+				transition = next_transition;
 			}
 			self.phase = Phase::WaitingForAnimationsToFinish(transitions);
 		}
@@ -882,15 +1027,15 @@ impl Game {
 
 impl EventHandler for Game {
 	fn update(&mut self, _ctx: &mut Context) -> GameResult {
-		let no_more_animations = !self.gw.has_animation();
+		let no_more_animations = !self.graphical_world.has_animation();
 		if no_more_animations {
 			if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
 				if next_tranitions.is_empty() {
 					self.phase = Phase::WaitingForPlayerToMakeAMove;
 				} else {
-					let lw_trans = next_tranitions.remove(0);
-					self.gw = GraphicalWorld::from_logical_world_transition(&lw_trans);
-					self.current_lw = lw_trans.resulting_lw.clone();
+					let transition = next_tranitions.remove(0);
+					self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
+					self.logical_world = transition.resulting_lw.clone();
 				}
 			}
 		}
@@ -915,7 +1060,7 @@ impl EventHandler for Game {
 	fn draw(&mut self, ctx: &mut Context) -> GameResult {
 		let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
 		canvas.set_sampler(Sampler::nearest_clamp());
-		self.gw.draw(ctx, &mut canvas, &self.spritesheet_stuff)?;
+		self.graphical_world.draw(ctx, &mut canvas, &self.spritesheet_stuff)?;
 		canvas.finish(ctx)?;
 		Ok(())
 	}
