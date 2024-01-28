@@ -74,6 +74,11 @@ impl Obj {
 		}
 	}
 
+	/// Can the player see over it?
+	fn blocks_vision(&self) -> bool {
+		matches!(self, Obj::Wall)
+	}
+
 	/// Some agents may be neutral, this only flags agents that are hostile to the player.
 	fn is_enemy(&self) -> bool {
 		matches!(self, Obj::Slime { .. })
@@ -161,15 +166,92 @@ impl LogicalWorld {
 		})
 	}
 
+	/// Computes the visibility of the tiles.
 	fn updated_visibility(mut self) -> LogicalWorld {
 		let player_coords = self.player_coords();
+		// First pass, most of the vision is established here.
+		let lw_clone = self.clone();
 		for (coords, tile) in self.grid.iter_mut() {
 			tile.visible = if let Some(player_coords) = player_coords {
 				let dist = player_coords.as_vec2().distance(coords.as_vec2());
-				dist <= 6.5
+				if dist == 0.0 {
+					true
+				} else {
+					// Only tiles in this radius may become visible.
+					dist <= 6.5 && {
+						let direction = (coords.as_vec2() - player_coords.as_vec2()).normalize();
+						let step = 0.1;
+						let mut point = player_coords.as_vec2();
+						loop {
+							if point.distance(coords.as_vec2()) < 3.0 * step {
+								// A line of sight was established, we got vision here.
+								break true;
+							}
+							let point_coords = point.round().as_ivec2();
+							if lw_clone.grid.get(&point_coords).is_some_and(|tile| {
+								tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
+							}) {
+								// A vision-blocking object is blocking the line of sight.
+								break point_coords == *coords;
+							}
+							point += direction * step;
+						}
+					}
+				}
 			} else {
 				true
 			};
+		}
+		// Second pass, add vision to some vision-blocking objects,
+		// mostly for aesthetic purposes.
+		let lw_clone = self.clone();
+		for (coords, tile) in self.grid.iter_mut() {
+			if let Some(player_coords) = player_coords {
+				let dist = player_coords.as_vec2().distance(coords.as_vec2());
+				if dist <= 6.5
+					&& lw_clone.grid.get(coords).is_some_and(|tile| {
+						!tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
+					}) {
+					for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+						let to_adjecent = IVec2::from(to_adjecent);
+						let adjacent_coords = *coords + to_adjecent;
+						if lw_clone.grid.get(&adjacent_coords).is_some_and(|tile| {
+							tile.visible
+								&& (tile.obj.as_ref().is_some_and(|obj| !obj.blocks_vision())
+									|| tile.obj.is_none())
+						}) {
+							tile.visible = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+		// Third pass, add vision to some vision-blocking objects in corners of visible
+		// vision-blocking objects, entierly for aesthetic purposes.
+		let lw_clone = self.clone();
+		for (coords, tile) in self.grid.iter_mut() {
+			if let Some(player_coords) = player_coords {
+				let dist = player_coords.as_vec2().distance(coords.as_vec2());
+				if dist <= 6.5
+					&& lw_clone.grid.get(coords).is_some_and(|tile| {
+						!tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
+					}) {
+					for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+						let to_adjecent = IVec2::from(to_adjecent);
+						let adjacent_coords = *coords + to_adjecent;
+						if lw_clone.grid.get(&adjacent_coords).is_some_and(|tile| {
+							tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
+						}) && lw_clone.grid.get(&(*coords + to_adjecent.perp())).is_some_and(|tile| {
+							tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
+						}) {
+							// Corner that would look better if visible detected, granting visibility.
+							tile.visible = true;
+							break;
+						}
+					}
+				}
+			}
 		}
 		self
 	}
