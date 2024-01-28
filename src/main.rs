@@ -53,8 +53,9 @@ impl Game {
 	fn player_move(&mut self, direction: IVec2) {
 		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
 			let mut transition = self.logical_world.player_move(direction);
-			self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
 			self.logical_world = transition.resulting_lw.clone();
+			self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
+			self.camera.set_target(&self.graphical_world.info_for_camera);
 
 			// Play all the moves of everything that is not a player up until the player's next turn.
 			transition.resulting_lw.give_move_token_to_agents();
@@ -75,8 +76,8 @@ impl EventHandler for Game {
 			if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
 				if !next_tranitions.is_empty() {
 					let transition = next_tranitions.remove(0);
-					self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
 					self.logical_world = transition.resulting_lw.clone();
+					self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
 					self.camera.set_target(&self.graphical_world.info_for_camera);
 				} else {
 					self.phase = Phase::WaitingForPlayerToMakeAMove;

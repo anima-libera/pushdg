@@ -243,14 +243,14 @@ impl GraphicalWorld {
 		spritesheet_stuff: &SpritesheetStuff,
 		camera: &Camera,
 	) -> GameResult {
-		let sprite_px_scaled_to_how_many_screen_px = 7.0;
-		let sprite_size_px = 8.0 * sprite_px_scaled_to_how_many_screen_px;
+		let tile_size_px = camera.tile_size_px();
+		let camera_pos = (camera.current_position * tile_size_px).as_ivec2().as_vec2() / tile_size_px;
 		for sprite in self.sprites.iter() {
 			if !sprite.visible() {
 				continue;
 			}
 			let center = sprite.center();
-			let top_left = (center - camera.current_position) * sprite_size_px;
+			let top_left = (center - camera_pos) * tile_size_px;
 			let top_left = top_left + Vec2::new(400.0, 400.0);
 			let plain_color = sprite.plain_color();
 			let (spritesheet, color) = if let Some(color) = plain_color {
@@ -261,13 +261,27 @@ impl GraphicalWorld {
 			} else {
 				(&spritesheet_stuff.spritesheet, Color::WHITE)
 			};
+			let rect_in_spritesheet = {
+				let mut rect = sprite.sprite_from_sheet.rect_in_spritesheet();
+				// Acceptable hack imho: Reduce a tiny bit the rect in the spritesheet,
+				// less than what would be necessary to see a difference,
+				// but enough so that edges of the rect are not ambiguously touching adjacent sprites.
+				// Not doing so leads to edges of adjacent sprites being sometime visible for a frame
+				// where they are not wanted, which is bad.
+				let margin = 0.03 / 128.0;
+				rect.x += margin;
+				rect.y += margin;
+				rect.w -= margin * 2.0;
+				rect.h -= margin * 2.0;
+				rect
+			};
 			canvas.draw(
 				spritesheet,
 				DrawParam::default()
 					.dest(top_left)
 					.offset(Vec2::new(0.5, 0.5))
-					.scale(Vec2::new(1.0, 1.0) * sprite_size_px / 8.0)
-					.src(sprite.sprite_from_sheet.rect_in_spritesheet())
+					.scale(Vec2::new(1.0, 1.0) * tile_size_px / (rect_in_spritesheet.h * 128.0))
+					.src(rect_in_spritesheet)
 					.z(sprite.depth_layer.to_z_value())
 					.color(color),
 			);
@@ -428,9 +442,14 @@ impl InfoForCamera {
 
 /// Points to a position in the world that ends up displayed at the center of the window.
 /// When the target moves (even abruptly), the camera follows smoothly.
+/// Also hold the zoom level.
 pub struct Camera {
 	target_position: Vec2,
 	current_position: Vec2,
+	/// Some number that represents how fast the camera moves to follow the target.
+	speed: f32,
+	/// A pixel in the spritesheet will be scaled up by this factor.
+	sprite_px_scaled_to_how_many_screen_px: i32,
 }
 
 impl Camera {
@@ -438,15 +457,37 @@ impl Camera {
 		Camera {
 			target_position: Vec2::new(0.0, 0.0),
 			current_position: Vec2::new(0.0, 0.0),
+			speed: 3.0,
+			sprite_px_scaled_to_how_many_screen_px: 7,
 		}
+	}
+
+	/// How long an edge of a tile should appear on the screen, measured in screen pixels.
+	fn tile_size_px(&self) -> f32 {
+		self.sprite_px_scaled_to_how_many_screen_px as f32 * 8.0
 	}
 
 	/// Make the camera move towards the target, smoothly. Expected to be called once per frame.
 	pub fn animate(&mut self, frame_dt: Duration) {
-		let speed = 4.0;
-		let update_factor = (speed * frame_dt.as_secs_f32()).min(1.0);
-		self.current_position =
+		// What portion of the remaining vector should we travel?
+		let update_factor = (self.speed * frame_dt.as_secs_f32()).min(1.0);
+		let next_position =
 			self.current_position * (1.0 - update_factor) + self.target_position * update_factor;
+		// Make sure we move enough so that we avoid an annoying visual effect.
+		// If we let the camera get slower and slower as it gets closer to the target,
+		// it eventually goes slow enough so that it only moves at a very few pixels every second,
+		// making each pixel jump noticable, which looks bad.
+		let min_pixels_traveled = 0.2;
+		let mut delta = next_position - self.current_position;
+		let mut delta_length = delta.length();
+		if delta_length == 0.0 {
+			// Avoid normalizing a zero-length vector,
+			// NaN poisioning is a curse no one should endure.
+			return;
+		}
+		delta_length = delta_length.max(min_pixels_traveled / self.tile_size_px());
+		delta = delta.normalize() * delta_length;
+		self.current_position += delta;
 	}
 
 	/// Sets the target on some new world state via some info about that state.
