@@ -352,33 +352,24 @@ impl LogicalWorld {
 		Some(direction)
 	}
 
-	/// In the case of an object W at `weapon_coords` hitting an object T
-	/// as it tries to move in the given `direction`, a hit may occur, and it may be a killing
-	/// hit, depending on hittability of T, the damages of W, the remaining HP of T.
-	/// This returns what would happen, would the hit occur.
-	fn what_would_happen_if_hit(
+	/// If the source object was pushed into the destination object in a blocked push, then what?
+	fn what_would_happen_if_interact(
 		&self,
-		weapon_coords: IVec2,
-		direction: IVec2,
-	) -> HitAttemptConsequences {
-		let weapon_obj = self.grid.get(&weapon_coords).as_ref().unwrap().obj.as_ref().unwrap();
-		let target_coords = weapon_coords + direction;
-		if let Some(target_obj) = self.grid.get(&target_coords).as_ref().unwrap().obj.as_ref() {
-			if matches!((weapon_obj, target_obj), (Obj::Pickaxe, Obj::Wall)) {
-				HitAttemptConsequences::Mine
-			} else if let Some(target_hp) = target_obj.hp() {
-				let damages = weapon_obj.damages();
-				if target_hp <= damages {
-					// HP would drop to zero or less.
-					HitAttemptConsequences::Kill { damages }
-				} else {
-					HitAttemptConsequences::NonLethalHit { damages }
-				}
+		src_obj: &Obj,
+		dst_obj: &Obj,
+	) -> Option<InteractionConsequences> {
+		if matches!((src_obj, dst_obj), (Obj::Pickaxe, Obj::Wall)) {
+			Some(InteractionConsequences::Mine)
+		} else if let Some(target_hp) = dst_obj.hp() {
+			let damages = src_obj.damages();
+			if target_hp <= damages {
+				// HP would drop to zero or less.
+				Some(InteractionConsequences::Kill { damages })
 			} else {
-				HitAttemptConsequences::TargetIsNotHittable
+				Some(InteractionConsequences::NonLethalHit { damages })
 			}
 		} else {
-			HitAttemptConsequences::ThereIsNoTraget
+			None
 		}
 	}
 
@@ -395,28 +386,45 @@ impl LogicalWorld {
 		let mut coords = mover_coords;
 		let mut remaining_force = force;
 		let mut length = 0;
-		let mut final_hit = HitAttemptConsequences::ThereIsNoTraget;
-		let success = loop {
+		let mut length_removed_due_to_interaction = 0;
+		let mut final_interaction = None;
+		let success = 'success: loop {
 			coords += direction;
 			length += 1;
 			if let Some(dst_tile) = self.grid.get(&coords) {
 				if let Some(dst_obj) = dst_tile.obj.as_ref() {
 					remaining_force -= dst_obj.mass();
 					if remaining_force < 0 {
-						// The final object of the chain that would have been pushed if the push
-						// if not for the target would now hit the target.
-						final_hit = self.what_would_happen_if_hit(coords - direction, direction);
-						break match final_hit {
-							HitAttemptConsequences::Mine | HitAttemptConsequences::Kill { .. } => {
-								// The target is killed, and as a design choice I find it cool
-								// that since now what was blocking is no more then the push
-								// happens now.
-								true
-							},
-							HitAttemptConsequences::NonLethalHit { .. }
-							| HitAttemptConsequences::TargetIsNotHittable => false,
-							HitAttemptConsequences::ThereIsNoTraget => unreachable!(),
-						};
+						// All the force of the pusher was used up, nothing more can be pushed.
+						// Now we scan the pushed chain backwards to search for an interaction.
+						while length_removed_due_to_interaction < length {
+							let src_obj = self
+								.grid
+								.get(&(coords - direction))
+								.as_ref()
+								.unwrap()
+								.obj
+								.as_ref()
+								.unwrap();
+							let dst_obj = self.grid.get(&(coords)).as_ref().unwrap().obj.as_ref().unwrap();
+							// The final object of the chain that would have been pushed but is blocked by
+							// the target now try to interact with the target.
+							final_interaction = self.what_would_happen_if_interact(src_obj, dst_obj);
+							if let Some(final_interaction) = final_interaction.as_ref() {
+								break 'success match final_interaction {
+									InteractionConsequences::Mine | InteractionConsequences::Kill { .. } => {
+										// The target is killed, and as a design choice I find it cool
+										// that since now what was blocking is no more then the push
+										// happens now.
+										true
+									},
+									InteractionConsequences::NonLethalHit { .. } => false,
+								};
+							}
+							length_removed_due_to_interaction += 1;
+							coords -= direction;
+						}
+						break false;
 					}
 				} else {
 					break true;
@@ -425,7 +433,10 @@ impl LogicalWorld {
 				break false;
 			}
 		};
-		MoveAttemptConsequences { success, length, final_hit }
+		if final_interaction.is_some() {
+			length -= length_removed_due_to_interaction;
+		}
+		MoveAttemptConsequences { success, length, final_interaction }
 	}
 
 	/// Returns the transition of the object at the given coords trying to move
@@ -433,7 +444,7 @@ impl LogicalWorld {
 	fn try_to_move(&self, mover_coords: IVec2, direction: IVec2, force: i32) -> LogicalTransition {
 		let mut res_lw = self.clone();
 		let mut logical_events = vec![];
-		let MoveAttemptConsequences { success, length, final_hit } =
+		let MoveAttemptConsequences { success, length, final_interaction } =
 			self.what_would_happen_if_try_to_move(mover_coords, direction, force);
 		let mut coords = mover_coords;
 		let mut previous_obj = None;
@@ -457,47 +468,48 @@ impl LogicalWorld {
 			}
 			coords += direction;
 		}
-		// We are at the end of the push chain. There may be a hit happening there,
-		// with the last object moving or failing to move hitting what comes after.
+		// We are at the end of the push chain. There may be an interaction happening there,
+		// with the last object moving or failing to move interacting with what comes after.
 		if success {
 			std::mem::swap(
 				&mut previous_obj,
 				&mut res_lw.grid.get_mut(&coords).unwrap().obj,
 			);
-			match final_hit {
-				HitAttemptConsequences::Kill { damages } => {
-					// The hit kills the blocking object, allowing the push to succeed
-					// and the last object of the push chain to take the place of the target.
-					let target_obj = previous_obj.take().unwrap();
-					logical_events.push(LogicalEvent::Killed { obj: target_obj, at: coords, damages });
-				},
-				HitAttemptConsequences::Mine => {
-					let target_obj = previous_obj.take().unwrap();
-					logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
-				},
-				HitAttemptConsequences::NonLethalHit { .. }
-				| HitAttemptConsequences::TargetIsNotHittable => {
-					unreachable!(
-						"If there is a non-killed target, then the push would have been a failure"
-					)
-				},
-				HitAttemptConsequences::ThereIsNoTraget => assert!(previous_obj.is_none()),
+			if let Some(final_interaction) = final_interaction {
+				match final_interaction {
+					InteractionConsequences::Kill { damages } => {
+						// The hit kills the blocking object, allowing the push to succeed
+						// and the last object of the push chain to take the place of the target.
+						let target_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::Killed {
+							obj: target_obj,
+							at: coords,
+							damages,
+						});
+					},
+					InteractionConsequences::Mine => {
+						let target_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
+					},
+					InteractionConsequences::NonLethalHit { .. } => {
+						unreachable!(
+							"If there is a non-killed target, then the push would have been a failure"
+						)
+					},
+				}
 			}
 			assert!(previous_obj.is_none());
-		} else {
-			match final_hit {
-				HitAttemptConsequences::NonLethalHit { damages } => {
+		} else if let Some(final_interaction) = final_interaction {
+			match final_interaction {
+				InteractionConsequences::NonLethalHit { damages } => {
 					let target_obj = res_lw.grid.get_mut(&coords).unwrap().obj.as_mut().unwrap();
 					target_obj.take_damage(damages);
 					logical_events.push(LogicalEvent::Hit { at: coords, damages });
 				},
-				HitAttemptConsequences::TargetIsNotHittable => {},
-				HitAttemptConsequences::Kill { .. }
-				| HitAttemptConsequences::Mine
-				| HitAttemptConsequences::ThereIsNoTraget => {
+				InteractionConsequences::Kill { .. } | InteractionConsequences::Mine => {
 					unreachable!(
 						"If there is no or no more target, \
-						then nothing is blocking the push from succeeding"
+  						then nothing is blocking the push from succeeding"
 					)
 				},
 			}
@@ -506,11 +518,7 @@ impl LogicalWorld {
 	}
 }
 
-enum HitAttemptConsequences {
-	ThereIsNoTraget,
-	/// Some targets cannot be hit in the sense that they do not have any HP
-	/// and the notion of taking damages does not make sense for them.
-	TargetIsNotHittable,
+enum InteractionConsequences {
 	NonLethalHit {
 		damages: i32,
 	},
@@ -528,9 +536,9 @@ struct MoveAttemptConsequences {
 	success: bool,
 	/// The number of object that move or fail to move.
 	length: i32,
-	/// The frontmost object to move may hit an other object in front of it,
-	/// if a hit happens and its consequences are also consequences of the move.
-	final_hit: HitAttemptConsequences,
+	/// The frontmost object to move may interact with an other object in front of it,
+	/// if an interaction occurs and its consequences are also consequences of the move.
+	final_interaction: Option<InteractionConsequences>,
 }
 
 /// When something happens to turn a logical state of the world into an other,
