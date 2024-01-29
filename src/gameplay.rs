@@ -284,8 +284,8 @@ impl LogicalWorld {
 			let player_force = 2;
 			self
 				.try_to_move(coords, direction, player_force)
-				.updated_visibility()
 				.generated_walls_outside()
+				.updated_visibility()
 		} else {
 			LogicalTransition { resulting_lw: self.clone(), logical_events: vec![] }
 		}
