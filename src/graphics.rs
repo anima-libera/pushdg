@@ -419,7 +419,7 @@ impl TemporaryTextAnimation {
 			from,
 			to,
 			color,
-			time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.3)),
+			time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.2)),
 		}
 	}
 
