@@ -163,6 +163,9 @@ impl LogicalWorld {
 	pub fn tiles(&self) -> impl Iterator<Item = (IVec2, &Tile)> {
 		self.grid.iter().map(|(&coords, tile)| (coords, tile))
 	}
+	pub fn tile(&self, coords: IVec2) -> Option<&Tile> {
+		self.grid.get(&coords)
+	}
 
 	fn player_coords(&self) -> Option<IVec2> {
 		self.grid.iter().find_map(|(&coords, tile)| {

@@ -73,17 +73,23 @@ impl Game {
 
 impl EventHandler for Game {
 	fn update(&mut self, ctx: &mut Context) -> GameResult {
-		let no_more_animations = !self.graphical_world.has_animation();
-		if no_more_animations {
-			if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
-				if !next_tranitions.is_empty() {
-					let transition = next_tranitions.remove(0);
-					self.logical_world = transition.resulting_lw.clone();
-					self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
-					self.camera.set_target(&self.graphical_world.info_for_camera);
+		loop {
+			let no_more_animations = !self.graphical_world.has_animation();
+			if no_more_animations {
+				if let Phase::WaitingForAnimationsToFinish(next_tranitions) = &mut self.phase {
+					if !next_tranitions.is_empty() {
+						let transition = next_tranitions.remove(0);
+						self.logical_world = transition.resulting_lw.clone();
+						self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
+						self.camera.set_target(&self.graphical_world.info_for_camera);
+					} else {
+						self.phase = Phase::WaitingForPlayerToMakeAMove;
+					}
 				} else {
-					self.phase = Phase::WaitingForPlayerToMakeAMove;
+					break;
 				}
+			} else {
+				break;
 			}
 		}
 

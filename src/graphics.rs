@@ -216,19 +216,21 @@ impl GraphicalWorld {
 			match logical_event {
 				// When damages are dealt, a damage number shall appear and float away.
 				LogicalEvent::Killed { at, damages, .. } | LogicalEvent::Hit { at, damages, .. } => {
-					gw.add_sprite(DisplayedSprite::new(
-						SpriteFromSheet::Digit(*damages as u8),
-						at.as_vec2(),
-						DepthLayer::TemporaryText,
-						None,
-						None,
-						None,
-						Some(TemporaryTextAnimation::new(
-							at.as_vec2() + Vec2::new(0.0, -0.5),
-							at.as_vec2() + Vec2::new(0.0, -1.5),
-							Color::RED,
-						)),
-					));
+					if transition.resulting_lw.tile(*at).is_some_and(|tile| tile.visible) {
+						gw.add_sprite(DisplayedSprite::new(
+							SpriteFromSheet::Digit(*damages as u8),
+							at.as_vec2(),
+							DepthLayer::TemporaryText,
+							None,
+							None,
+							None,
+							Some(TemporaryTextAnimation::new(
+								at.as_vec2() + Vec2::new(0.0, -0.5),
+								at.as_vec2() + Vec2::new(0.0, -1.5),
+								Color::RED,
+							)),
+						));
+					}
 				},
 				_ => {},
 			}
