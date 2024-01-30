@@ -493,6 +493,12 @@ impl Camera {
 			return;
 		}
 		delta_length = delta_length.max(min_pixels_traveled / self.tile_size_px());
+		let dist = self.current_position.distance(self.target_position);
+		if dist < delta_length * 1.6 {
+			// Make sure we eventually get exactly to the target.
+			self.current_position = self.target_position;
+			return;
+		}
 		delta = delta.normalize() * delta_length;
 		self.current_position += delta;
 	}
