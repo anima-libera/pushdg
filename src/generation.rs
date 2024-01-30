@@ -112,6 +112,19 @@ impl Generator {
 				}
 			}
 
+			if thread_rng().gen_range(0..6) == 0 {
+				let v = thread_rng().gen_range(2..=4);
+				for coords in filled_inner_rect(top_left, dimensions) {
+					if ((coords.x + coords.y) % v == 0
+						&& coords.x % 2 == 0
+						&& thread_rng().gen_range(0..6) != 0)
+						|| ((coords.x + coords.y) % 2 != v && thread_rng().gen_range(0..10) == 0)
+					{
+						self.lw.place_tile(coords, Tile::obj(Obj::Wall));
+					}
+				}
+			}
+
 			if is_last_room {
 				// Exit.
 				let x = top_left.x + thread_rng().gen_range(0..dimensions.x);
