@@ -54,7 +54,9 @@ pub enum SpriteFromSheet {
 	Slime,
 	Pickaxe,
 	Exit,
+	Heart,
 	Digit(u8),
+	Slash,
 }
 
 impl SpriteFromSheet {
@@ -63,6 +65,10 @@ impl SpriteFromSheet {
 		if let SpriteFromSheet::Digit(digit) = self {
 			let x = digit * 4;
 			let y = 16;
+			return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
+		} else if let SpriteFromSheet::Slash = self {
+			let x = 0;
+			let y = 16 + 6;
 			return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
 		}
 
@@ -77,7 +83,8 @@ impl SpriteFromSheet {
 			SpriteFromSheet::Slime => (5, 0),
 			SpriteFromSheet::Pickaxe => (6, 0),
 			SpriteFromSheet::Exit => (7, 0),
-			SpriteFromSheet::Digit(_) => unreachable!("Handled above"),
+			SpriteFromSheet::Heart => (1, 1),
+			SpriteFromSheet::Digit(_) | SpriteFromSheet::Slash => unreachable!("Handled above"),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,

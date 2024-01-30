@@ -63,7 +63,7 @@ impl Generator {
 	fn generate_level(&mut self) {
 		// Starting room.
 		self.generate_empty_room(IVec2::new(-4, -4), IVec2::new(9, 9));
-		self.lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5 }));
+		self.lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5, max_hp: 5 }));
 		self.lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Shield));
 		self.lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Sword));
 		self.generate_corridor(IVec2::new(4, 0), IVec2::new(1, 0), 4, 1);

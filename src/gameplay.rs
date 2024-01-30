@@ -28,7 +28,7 @@ pub enum Obj {
 	/// An exit door that objects can go through to go to the next level.
 	Exit,
 	/// The player. We play as a bunny. It is cute! :3
-	Bunny { hp: i32 },
+	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
 	Slime {
 		hp: i32,
@@ -63,7 +63,7 @@ impl Obj {
 	/// An object may take damages if it has some HP.
 	fn hp(&self) -> Option<i32> {
 		match self {
-			Obj::Bunny { hp } | Obj::Slime { hp, .. } => Some(*hp),
+			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } => Some(*hp),
 			_ => None,
 		}
 	}
@@ -72,7 +72,7 @@ impl Obj {
 	/// killing hits should be handled by hand.
 	fn take_damage(&mut self, damages: i32) {
 		match self {
-			Obj::Bunny { hp } | Obj::Slime { hp, .. } => *hp -= damages,
+			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } => *hp -= damages,
 			_ => {},
 		}
 	}

@@ -24,15 +24,18 @@ enum DepthLayer {
 	Obj,
 	AnimatedObj,
 	TemporaryText,
+	Interface,
 }
 
 impl DepthLayer {
 	fn to_z_value(&self) -> i32 {
+		// Higer is closer to foreground, lower is closer to background.
 		match self {
 			DepthLayer::Floor => 1,
 			DepthLayer::Obj => 2,
 			DepthLayer::AnimatedObj => 3,
 			DepthLayer::TemporaryText => 4,
+			DepthLayer::Interface => 5,
 		}
 	}
 }
@@ -42,6 +45,10 @@ struct DisplayedSprite {
 	sprite_from_sheet: SpriteFromSheet,
 	center: Vec2,
 	depth_layer: DepthLayer,
+	/// Is it in the world (and should move with the camera) or not (like a piece of interface)?
+	in_world: bool,
+	plain_color: Option<Color>,
+	height_for_scale: Option<f32>,
 	move_animation: Option<MoveAnimation>,
 	fail_to_move_animation: Option<FailToMoveAnimation>,
 	hit_animation: Option<HitAnimation>,
@@ -53,15 +60,24 @@ impl DisplayedSprite {
 		sprite_from_sheet: SpriteFromSheet,
 		center: Vec2,
 		depth_layer: DepthLayer,
-		move_animation: Option<MoveAnimation>,
-		fail_to_move_animation: Option<FailToMoveAnimation>,
-		hit_animation: Option<HitAnimation>,
-		temporary_text_animation: Option<TemporaryTextAnimation>,
+		in_world: bool,
+		plain_color: Option<Color>,
+		height_for_scale: Option<f32>,
+		animations: Animations,
 	) -> DisplayedSprite {
+		let Animations {
+			move_animation,
+			fail_to_move_animation,
+			hit_animation,
+			temporary_text_animation,
+		} = animations;
 		DisplayedSprite {
 			sprite_from_sheet,
 			center,
 			depth_layer,
+			in_world,
+			plain_color,
+			height_for_scale,
 			move_animation,
 			fail_to_move_animation,
 			hit_animation,
@@ -112,6 +128,7 @@ impl DisplayedSprite {
 		} else {
 			None
 		}
+		.or(self.plain_color)
 	}
 }
 
@@ -157,6 +174,7 @@ impl GraphicalWorld {
 	/// the remaining representation depicts the logical world that results from the transition.
 	pub fn from_logical_world_transition(transition: &LogicalTransition) -> GraphicalWorld {
 		let mut gw = GraphicalWorld::new();
+		let mut bunny_copy = None;
 		// We iterate over all the tiles, creating sprites to represent their content.
 		for (coords, tile) in transition.resulting_lw.tiles() {
 			if !tile.visible {
@@ -168,16 +186,17 @@ impl GraphicalWorld {
 					SpriteFromSheet::Floor,
 					coords.as_vec2(),
 					DepthLayer::Floor,
+					true,
 					None,
 					None,
-					None,
-					None,
+					Animations::new(None, None, None, None),
 				));
 			}
 			// Object.
 			if let Some(obj) = tile.obj.as_ref() {
 				let sprite_from_sheet = obj_to_sprite(obj);
 				if matches!(obj, Obj::Bunny { .. }) {
+					bunny_copy = Some(obj);
 					gw.info_for_camera.player_position = Some(coords.as_vec2());
 				}
 				// If the object is mentioned by a logical event of the transition,
@@ -212,13 +231,14 @@ impl GraphicalWorld {
 					sprite_from_sheet,
 					coords.as_vec2(),
 					depth_layer,
-					move_animation,
-					fail_to_move_animation,
-					hit_animation,
+					true,
 					None,
+					None,
+					Animations::new(move_animation, fail_to_move_animation, hit_animation, None),
 				));
 			}
 		}
+		// Some sprites represent events which are not exactly representations of tiles.
 		for logical_event in transition.logical_events.iter() {
 			match logical_event {
 				LogicalEvent::Killed { at, damages, .. } | LogicalEvent::Hit { at, damages, .. } => {
@@ -228,14 +248,19 @@ impl GraphicalWorld {
 							SpriteFromSheet::Digit(*damages as u8),
 							at.as_vec2(),
 							DepthLayer::TemporaryText,
+							true,
 							None,
 							None,
-							None,
-							Some(TemporaryTextAnimation::new(
-								at.as_vec2() + Vec2::new(0.0, -0.5),
-								at.as_vec2() + Vec2::new(0.0, -1.5),
-								Color::RED,
-							)),
+							Animations::new(
+								None,
+								None,
+								None,
+								Some(TemporaryTextAnimation::new(
+									at.as_vec2() + Vec2::new(0.0, -0.5),
+									at.as_vec2() + Vec2::new(0.0, -1.5),
+									Color::RED,
+								)),
+							),
 						));
 					}
 				},
@@ -246,18 +271,79 @@ impl GraphicalWorld {
 							sprite_from_sheet,
 							to.as_vec2(),
 							DepthLayer::AnimatedObj,
-							Some(MoveAnimation::new_disappear_after(
-								from.as_vec2(),
-								to.as_vec2(),
-							)),
+							true,
 							None,
 							None,
-							None,
+							Animations::new(
+								Some(MoveAnimation::new_disappear_after(
+									from.as_vec2(),
+									to.as_vec2(),
+								)),
+								None,
+								None,
+								None,
+							),
 						));
 					}
 				},
 				_ => {},
 			}
+		}
+		// Info from bunny.
+		if let Some(Obj::Bunny { hp, max_hp }) = bunny_copy {
+			// Interface.
+			let interface_scale = 5.0;
+			let char_height = 5.0 * interface_scale;
+			let char_width = 3.0 * interface_scale;
+			let space_width = 1.0 * interface_scale;
+			let heart_width = 7.0 * interface_scale;
+			let heart_height = 8.0 * interface_scale;
+			let heart_rescale = 5.0 / 6.0;
+			let heart_y_offset = -1.0 * interface_scale;
+			let mut add_char_sprite =
+				|sprite_from_sheet: SpriteFromSheet, center: Vec2, height: f32, white: bool| {
+					gw.add_sprite(DisplayedSprite::new(
+						sprite_from_sheet,
+						center,
+						DepthLayer::Interface,
+						false,
+						white.then_some(Color::WHITE),
+						Some(height),
+						Animations::new(None, None, None, None),
+					));
+				};
+			let ui_x = 15.0;
+			add_char_sprite(
+				SpriteFromSheet::Heart,
+				Vec2::new(ui_x, 20.0 + heart_y_offset)
+					+ Vec2::new(heart_width, heart_height) * heart_rescale / 2.0,
+				heart_height * heart_rescale,
+				false,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Digit(*hp as u8),
+				Vec2::new(ui_x, 20.0)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + space_width, 0.0),
+				char_height,
+				true,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Slash,
+				Vec2::new(ui_x, 20.0)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + char_width + space_width * 2.0, 0.0),
+				char_height,
+				true,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Digit(*max_hp as u8),
+				Vec2::new(ui_x, 20.0)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + char_width * 2.0 + space_width * 3.0, 0.0),
+				char_height,
+				true,
+			);
 		}
 		gw
 	}
@@ -281,8 +367,11 @@ impl GraphicalWorld {
 				continue;
 			}
 			let center = sprite.center();
-			let top_left = (center - camera_pos) * tile_size_px;
-			let top_left = top_left + Vec2::new(400.0, 400.0);
+			let dest = if sprite.in_world {
+				(center - camera_pos) * tile_size_px + Vec2::new(400.0, 400.0)
+			} else {
+				center
+			};
 			let plain_color = sprite.plain_color();
 			let (spritesheet, color) = if let Some(color) = plain_color {
 				// A plain color shall be multiplied to the sprite, but we want all the sprite
@@ -306,12 +395,13 @@ impl GraphicalWorld {
 				rect.h -= margin * 2.0;
 				rect
 			};
+			let height_for_scale = sprite.height_for_scale.unwrap_or(tile_size_px);
 			canvas.draw(
 				spritesheet,
 				DrawParam::default()
-					.dest(top_left)
+					.dest(dest)
 					.offset(Vec2::new(0.5, 0.5))
-					.scale(Vec2::new(1.0, 1.0) * tile_size_px / (rect_in_spritesheet.h * 128.0))
+					.scale(Vec2::new(1.0, 1.0) * height_for_scale / (rect_in_spritesheet.h * 128.0))
 					.src(rect_in_spritesheet)
 					.z(sprite.depth_layer.to_z_value())
 					.color(color),
@@ -472,6 +562,29 @@ impl TemporaryTextAnimation {
 
 	fn current_plain_color(&self) -> Option<Color> {
 		Some(self.color)
+	}
+}
+
+struct Animations {
+	move_animation: Option<MoveAnimation>,
+	fail_to_move_animation: Option<FailToMoveAnimation>,
+	hit_animation: Option<HitAnimation>,
+	temporary_text_animation: Option<TemporaryTextAnimation>,
+}
+
+impl Animations {
+	fn new(
+		move_animation: Option<MoveAnimation>,
+		fail_to_move_animation: Option<FailToMoveAnimation>,
+		hit_animation: Option<HitAnimation>,
+		temporary_text_animation: Option<TemporaryTextAnimation>,
+	) -> Animations {
+		Animations {
+			move_animation,
+			fail_to_move_animation,
+			hit_animation,
+			temporary_text_animation,
+		}
 	}
 }
 
