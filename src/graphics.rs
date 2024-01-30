@@ -167,6 +167,7 @@ impl GraphicalWorld {
 					Obj::Shield => SpriteFromSheet::Shield,
 					Obj::Pickaxe => SpriteFromSheet::Pickaxe,
 					Obj::Rock => SpriteFromSheet::Rock,
+					Obj::Exit => SpriteFromSheet::Exit,
 					Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 					Obj::Slime { .. } => SpriteFromSheet::Slime,
 				};

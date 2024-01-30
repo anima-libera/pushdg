@@ -71,7 +71,10 @@ impl Generator {
 		// Succession of rooms.
 		let mut room_x = 8;
 		let mut entry_y = 0;
-		for _ in 0..6 {
+		let room_count = 6;
+		for room_index in 0..room_count {
+			let is_last_room = room_index == room_count - 1;
+
 			// Room dimensions.
 			let up = thread_rng().gen_range(1..=5) + 2;
 			let down = thread_rng().gen_range(1..=5) + 2;
@@ -109,18 +112,28 @@ impl Generator {
 				}
 			}
 
-			// Exit corridor to next room.
-			let exit_x = room_x + right - 1;
-			let exit_y = thread_rng().gen_range((top_left.y + 1)..(top_left.y + dimensions.y - 1));
-			let corridor_length = thread_rng().gen_range(1..=4);
-			self.generate_corridor(
-				IVec2::new(exit_x, exit_y),
-				IVec2::new(1, 0),
-				corridor_length,
-				2,
-			);
-			room_x = exit_x + corridor_length - 1;
-			entry_y = exit_y;
+			if is_last_room {
+				// Exit.
+				let x = top_left.x + thread_rng().gen_range(0..dimensions.x);
+				let y = top_left.y + thread_rng().gen_range(0..dimensions.y);
+				let coords = IVec2::new(x, y);
+				self.lw.place_tile(coords, Tile::obj(Obj::Exit));
+			}
+
+			if !is_last_room {
+				// Exit corridor to next room.
+				let exit_x = room_x + right - 1;
+				let exit_y = thread_rng().gen_range((top_left.y + 1)..(top_left.y + dimensions.y - 1));
+				let corridor_length = thread_rng().gen_range(1..=4);
+				self.generate_corridor(
+					IVec2::new(exit_x, exit_y),
+					IVec2::new(1, 0),
+					corridor_length,
+					2,
+				);
+				room_x = exit_x + corridor_length - 1;
+				entry_y = exit_y;
+			}
 		}
 	}
 }

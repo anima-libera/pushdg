@@ -25,6 +25,8 @@ pub enum Obj {
 	Pickaxe,
 	/// The average pushable object, has the default stat for every stat.
 	Rock,
+	/// An exit door that objects can go through to go to the next level.
+	Exit,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32 },
 	/// The basic enemy.
@@ -42,8 +44,7 @@ impl Obj {
 	fn mass(&self) -> i32 {
 		match self {
 			Obj::Wall => 10,
-			Obj::Slime { .. } => 3,
-			Obj::Bunny { .. } => 3,
+			Obj::Slime { .. } | Obj::Bunny { .. } => 3,
 			_ => 1,
 		}
 	}
@@ -53,7 +54,7 @@ impl Obj {
 	fn damages(&self) -> i32 {
 		match self {
 			Obj::Sword => 3,
-			Obj::Shield => 0,
+			Obj::Shield | Obj::Exit => 0,
 			Obj::Slime { .. } => 2,
 			_ => 1,
 		}
@@ -62,8 +63,7 @@ impl Obj {
 	/// An object may take damages if it has some HP.
 	fn hp(&self) -> Option<i32> {
 		match self {
-			Obj::Bunny { hp } => Some(*hp),
-			Obj::Slime { hp, .. } => Some(*hp),
+			Obj::Bunny { hp } | Obj::Slime { hp, .. } => Some(*hp),
 			_ => None,
 		}
 	}
@@ -72,8 +72,7 @@ impl Obj {
 	/// killing hits should be handled by hand.
 	fn take_damage(&mut self, damages: i32) {
 		match self {
-			Obj::Bunny { hp } => *hp -= damages,
-			Obj::Slime { hp, .. } => *hp -= damages,
+			Obj::Bunny { hp } | Obj::Slime { hp, .. } => *hp -= damages,
 			_ => {},
 		}
 	}
@@ -357,8 +356,11 @@ impl LogicalWorld {
 		&self,
 		src_obj: &Obj,
 		dst_obj: &Obj,
+		dst_coords: IVec2,
 	) -> Option<InteractionConsequences> {
-		if matches!((src_obj, dst_obj), (Obj::Pickaxe, Obj::Wall)) {
+		if matches!(dst_obj, Obj::Exit) {
+			Some(InteractionConsequences::Exit { at: dst_coords })
+		} else if matches!((src_obj, dst_obj), (Obj::Pickaxe, Obj::Wall)) {
 			Some(InteractionConsequences::Mine)
 		} else if let Some(target_hp) = dst_obj.hp() {
 			let damages = src_obj.damages();
@@ -398,18 +400,14 @@ impl LogicalWorld {
 						// All the force of the pusher was used up, nothing more can be pushed.
 						// Now we scan the pushed chain backwards to search for an interaction.
 						while length_removed_due_to_interaction < length {
-							let src_obj = self
-								.grid
-								.get(&(coords - direction))
-								.as_ref()
-								.unwrap()
-								.obj
-								.as_ref()
-								.unwrap();
-							let dst_obj = self.grid.get(&(coords)).as_ref().unwrap().obj.as_ref().unwrap();
+							let src_coords = coords - direction;
+							let src_obj =
+								self.grid.get(&src_coords).as_ref().unwrap().obj.as_ref().unwrap();
+							let dst_obj = self.grid.get(&coords).as_ref().unwrap().obj.as_ref().unwrap();
 							// The final object of the chain that would have been pushed but is blocked by
 							// the target now try to interact with the target.
-							final_interaction = self.what_would_happen_if_interact(src_obj, dst_obj);
+							final_interaction =
+								self.what_would_happen_if_interact(src_obj, dst_obj, coords);
 							if let Some(final_interaction) = final_interaction.as_ref() {
 								break 'success match final_interaction {
 									InteractionConsequences::Mine | InteractionConsequences::Kill { .. } => {
@@ -418,6 +416,7 @@ impl LogicalWorld {
 										// happens now.
 										true
 									},
+									InteractionConsequences::Exit { .. } => true,
 									InteractionConsequences::NonLethalHit { .. } => false,
 								};
 							}
@@ -456,7 +455,12 @@ impl LogicalWorld {
 					&mut previous_obj,
 					&mut res_lw.grid.get_mut(&coords).unwrap().obj,
 				);
-				if previous_obj.is_some() {
+				let is_exiting = if let Some(InteractionConsequences::Exit { at }) = final_interaction {
+					at == coords + direction
+				} else {
+					false
+				};
+				if previous_obj.is_some() && !is_exiting {
 					logical_events.push(LogicalEvent::Move { from: coords, to: coords + direction });
 				}
 			} else {
@@ -491,6 +495,18 @@ impl LogicalWorld {
 						let target_obj = previous_obj.take().unwrap();
 						logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
 					},
+					InteractionConsequences::Exit { .. } => {
+						std::mem::swap(
+							&mut previous_obj,
+							&mut res_lw.grid.get_mut(&coords).unwrap().obj,
+						);
+						let exiting_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::Exit {
+							obj: exiting_obj,
+							from: coords - direction,
+							to: coords,
+						});
+					},
 					InteractionConsequences::NonLethalHit { .. } => {
 						unreachable!(
 							"If there is a non-killed target, then the push would have been a failure"
@@ -506,7 +522,9 @@ impl LogicalWorld {
 					target_obj.take_damage(damages);
 					logical_events.push(LogicalEvent::Hit { at: coords, damages });
 				},
-				InteractionConsequences::Kill { .. } | InteractionConsequences::Mine => {
+				InteractionConsequences::Kill { .. }
+				| InteractionConsequences::Mine
+				| InteractionConsequences::Exit { .. } => {
 					unreachable!(
 						"If there is no or no more target, \
   						then nothing is blocking the push from succeeding"
@@ -529,6 +547,11 @@ enum InteractionConsequences {
 	},
 	/// Pickaxe mining a wall for example.
 	Mine,
+	/// Exit the level through an exit door.
+	Exit {
+		/// Coords of the exit door through which an object exits.
+		at: IVec2,
+	},
 }
 
 struct MoveAttemptConsequences {
@@ -551,6 +574,7 @@ pub enum LogicalEvent {
 	Hit { at: IVec2, damages: i32 },
 	Killed { obj: Obj, at: IVec2, damages: i32 },
 	Mined { obj: Obj, at: IVec2 },
+	Exit { obj: Obj, from: IVec2, to: IVec2 },
 }
 
 /// When the player or agents move or something happens in the game,

@@ -53,6 +53,7 @@ pub enum SpriteFromSheet {
 	Bunny,
 	Slime,
 	Pickaxe,
+	Exit,
 	Digit(u8),
 }
 
@@ -75,6 +76,7 @@ impl SpriteFromSheet {
 			SpriteFromSheet::Bunny => (4, 0),
 			SpriteFromSheet::Slime => (5, 0),
 			SpriteFromSheet::Pickaxe => (6, 0),
+			SpriteFromSheet::Exit => (7, 0),
 			SpriteFromSheet::Digit(_) => unreachable!("Handled above"),
 		};
 		Rect::new(
