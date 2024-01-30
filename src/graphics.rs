@@ -83,7 +83,9 @@ impl DisplayedSprite {
 	}
 
 	fn visible(&self) -> bool {
-		if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
+		if let Some(move_animation) = self.move_animation.as_ref() {
+			move_animation.currently_visible()
+		} else if let Some(temporary_text_animation) = self.temporary_text_animation.as_ref() {
 			temporary_text_animation.currently_visible()
 		} else {
 			true
@@ -110,6 +112,19 @@ impl DisplayedSprite {
 		} else {
 			None
 		}
+	}
+}
+
+fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
+	match obj {
+		Obj::Wall => SpriteFromSheet::Wall,
+		Obj::Sword => SpriteFromSheet::Sword,
+		Obj::Shield => SpriteFromSheet::Shield,
+		Obj::Pickaxe => SpriteFromSheet::Pickaxe,
+		Obj::Rock => SpriteFromSheet::Rock,
+		Obj::Exit => SpriteFromSheet::Exit,
+		Obj::Bunny { .. } => SpriteFromSheet::Bunny,
+		Obj::Slime { .. } => SpriteFromSheet::Slime,
 	}
 }
 
@@ -161,16 +176,7 @@ impl GraphicalWorld {
 			}
 			// Object.
 			if let Some(obj) = tile.obj.as_ref() {
-				let sprite_from_sheet = match obj {
-					Obj::Wall => SpriteFromSheet::Wall,
-					Obj::Sword => SpriteFromSheet::Sword,
-					Obj::Shield => SpriteFromSheet::Shield,
-					Obj::Pickaxe => SpriteFromSheet::Pickaxe,
-					Obj::Rock => SpriteFromSheet::Rock,
-					Obj::Exit => SpriteFromSheet::Exit,
-					Obj::Bunny { .. } => SpriteFromSheet::Bunny,
-					Obj::Slime { .. } => SpriteFromSheet::Slime,
-				};
+				let sprite_from_sheet = obj_to_sprite(obj);
 				if matches!(obj, Obj::Bunny { .. }) {
 					gw.info_for_camera.player_position = Some(coords.as_vec2());
 				}
@@ -215,8 +221,8 @@ impl GraphicalWorld {
 		}
 		for logical_event in transition.logical_events.iter() {
 			match logical_event {
-				// When damages are dealt, a damage number shall appear and float away.
 				LogicalEvent::Killed { at, damages, .. } | LogicalEvent::Hit { at, damages, .. } => {
+					// When damages are dealt, a damage number shall appear and float away.
 					if transition.resulting_lw.tile(*at).is_some_and(|tile| tile.visible) {
 						gw.add_sprite(DisplayedSprite::new(
 							SpriteFromSheet::Digit(*damages as u8),
@@ -230,6 +236,23 @@ impl GraphicalWorld {
 								at.as_vec2() + Vec2::new(0.0, -1.5),
 								Color::RED,
 							)),
+						));
+					}
+				},
+				LogicalEvent::Exit { obj, from, to } => {
+					if transition.resulting_lw.tile(*from).is_some_and(|tile| tile.visible) {
+						let sprite_from_sheet = obj_to_sprite(obj);
+						gw.add_sprite(DisplayedSprite::new(
+							sprite_from_sheet,
+							to.as_vec2(),
+							DepthLayer::AnimatedObj,
+							Some(MoveAnimation::new_disappear_after(
+								from.as_vec2(),
+								to.as_vec2(),
+							)),
+							None,
+							None,
+							None,
 						));
 					}
 				},
@@ -326,6 +349,7 @@ struct MoveAnimation {
 	from: Vec2,
 	to: Vec2,
 	time_interval: TimeInterval,
+	disappear_after: bool,
 }
 
 impl MoveAnimation {
@@ -334,7 +358,21 @@ impl MoveAnimation {
 			from,
 			to,
 			time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+			disappear_after: false,
 		}
+	}
+
+	fn new_disappear_after(from: Vec2, to: Vec2) -> MoveAnimation {
+		MoveAnimation {
+			from,
+			to,
+			time_interval: TimeInterval::with_duration(Duration::from_secs_f32(0.05)),
+			disappear_after: true,
+		}
+	}
+
+	fn currently_visible(&self) -> bool {
+		!(self.disappear_after && self.time_interval.progress() >= 1.0)
 	}
 
 	fn current_position(&self) -> Vec2 {
