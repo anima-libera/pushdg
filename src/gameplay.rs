@@ -27,6 +27,8 @@ pub enum Obj {
 	Rock,
 	/// An exit door that objects can go through to go to the next level.
 	Exit,
+	/// Gem that grants wall-through vision to the player if adjacent.
+	VisionGem,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -176,6 +178,31 @@ impl LogicalWorld {
 	fn updated_visibility(mut self) -> LogicalWorld {
 		// TODO: Make this whole function more readable.
 		let player_coords = self.player_coords();
+
+		// Handle vision gem effect.
+		// If the player is adjacent to a vision gem then they get see-through vision.
+		if let Some(player_coords) = player_coords {
+			let adjacent_to_vision_gem = 'vision_gem: {
+				for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+					let to_adjecent = IVec2::from(to_adjecent);
+					let adjacent_coords = player_coords + to_adjecent;
+					if self.grid.get(&adjacent_coords).is_some_and(|tile| {
+						tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::VisionGem))
+					}) {
+						break 'vision_gem true;
+					}
+				}
+				false
+			};
+			if adjacent_to_vision_gem {
+				for (coords, tile) in self.grid.iter_mut() {
+					let dist = player_coords.as_vec2().distance(coords.as_vec2());
+					tile.visible = dist <= 6.5;
+				}
+				return self;
+			}
+		}
+
 		// First pass, most of the vision is established here.
 		let lw_clone = self.clone();
 		for (coords, tile) in self.grid.iter_mut() {

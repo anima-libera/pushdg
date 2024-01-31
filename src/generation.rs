@@ -127,6 +127,7 @@ impl Generator {
 		self.generate_corridor(IVec2::new(4, 0), IVec2::new(1, 0), 4, 1);
 
 		// Test.
+		self.lw.place_tile(IVec2::new(0, -2), Tile::obj(Obj::VisionGem));
 		self.generate_corridor_then_room(IVec2::new(-4, 0), IVec2::new(-1, 0), 8);
 
 		// Succession of rooms.

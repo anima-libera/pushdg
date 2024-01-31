@@ -54,6 +54,7 @@ pub enum SpriteFromSheet {
 	Slime,
 	Pickaxe,
 	Exit,
+	VisionGem,
 	Heart,
 	Digit(u8),
 	Slash,
@@ -83,6 +84,7 @@ impl SpriteFromSheet {
 			SpriteFromSheet::Slime => (5, 0),
 			SpriteFromSheet::Pickaxe => (6, 0),
 			SpriteFromSheet::Exit => (7, 0),
+			SpriteFromSheet::VisionGem => (8, 0),
 			SpriteFromSheet::Heart => (1, 1),
 			SpriteFromSheet::Digit(_) | SpriteFromSheet::Slash => unreachable!("Handled above"),
 		};
