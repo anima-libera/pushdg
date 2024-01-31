@@ -174,6 +174,7 @@ impl LogicalWorld {
 
 	/// Computes the visibility of the tiles.
 	fn updated_visibility(mut self) -> LogicalWorld {
+		// TODO: Make this whole function more readable.
 		let player_coords = self.player_coords();
 		// First pass, most of the vision is established here.
 		let lw_clone = self.clone();
@@ -244,14 +245,34 @@ impl LogicalWorld {
 						!tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
 					}) {
 					for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+						// Sorry for the very bad code here,
+						// it could do with lots of cleanup,
+						// for the story, it makes sure that the corner that we are about
+						// to make visible despite it being out of sight is a corner that
+						// would complete the corner of a piece of room in which the player is.
+						// TODO: Make this more readable.
 						let to_adjecent = IVec2::from(to_adjecent);
 						let adjacent_coords = *coords + to_adjecent;
+						let other_adjacent_coords = *coords + to_adjecent.perp();
+						let corner_coords = *coords + to_adjecent + to_adjecent.perp();
+						let coords_dist = coords.as_vec2().distance(player_coords.as_vec2());
+						let adjacent_dist = adjacent_coords.as_vec2().distance(player_coords.as_vec2());
+						let other_adjacent_dist =
+							other_adjacent_coords.as_vec2().distance(player_coords.as_vec2());
+						let corner_dist = corner_coords.as_vec2().distance(player_coords.as_vec2());
+						let min_dist_is_corner =
+							corner_dist < coords_dist.min(adjacent_dist).min(other_adjacent_dist);
 						if lw_clone.grid.get(&adjacent_coords).is_some_and(|tile| {
 							tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
-						}) && lw_clone.grid.get(&(*coords + to_adjecent.perp())).is_some_and(|tile| {
+						}) && lw_clone.grid.get(&other_adjacent_coords).is_some_and(|tile| {
 							tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
-						}) {
-							// Corner that would look better if visible detected, granting visibility.
+						}) && min_dist_is_corner
+							&& lw_clone.grid.get(&corner_coords).is_some_and(|tile| {
+								tile.visible
+									&& (tile.obj.is_none()
+										|| tile.obj.as_ref().is_some_and(|obj| !obj.blocks_vision()))
+							}) {
+							// Corner that would look better if visible, granting visibility.
 							tile.visible = true;
 							break;
 						}

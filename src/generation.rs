@@ -87,7 +87,7 @@ impl Generator {
 			return;
 		}
 
-		let corridor_length = randint(1, 6);
+		let corridor_length = randint(1, 3);
 		self.generate_corridor(start, direction, corridor_length, 1);
 		let room_entry = start + direction * corridor_length;
 		let measure_forward = randint(4, 9);
