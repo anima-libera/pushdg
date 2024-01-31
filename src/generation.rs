@@ -153,6 +153,7 @@ impl Generator {
 				(1, Some(Obj::Sword)),
 				(1, Some(Obj::Shield)),
 				(1, Some(Obj::Pickaxe)),
+				(1, Some(Obj::VisionGem)),
 				(5, Some(Obj::Slime { hp: 5, move_token: false })),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
