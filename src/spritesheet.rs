@@ -56,6 +56,7 @@ pub enum SpriteFromSheet {
 	Exit,
 	VisionGem,
 	Heart,
+	RedoHeart,
 	Digit(u8),
 	Slash,
 }
@@ -86,6 +87,7 @@ impl SpriteFromSheet {
 			SpriteFromSheet::Exit => (7, 0),
 			SpriteFromSheet::VisionGem => (8, 0),
 			SpriteFromSheet::Heart => (1, 1),
+			SpriteFromSheet::RedoHeart => (2, 1),
 			SpriteFromSheet::Digit(_) | SpriteFromSheet::Slash => unreachable!("Handled above"),
 		};
 		Rect::new(

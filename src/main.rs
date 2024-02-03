@@ -30,6 +30,7 @@ enum Phase {
 struct Game {
 	/// The current logical state of the world.
 	logical_world: LogicalWorld,
+	/// All previous states of the world, from oldest to most recent.
 	previous_logical_worlds: Vec<LogicalWorld>,
 	phase: Phase,
 	graphical_world: GraphicalWorld,
@@ -78,9 +79,13 @@ impl Game {
 	fn redo(&mut self) {
 		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
 			if let Some(previous_lw) = self.previous_logical_worlds.pop() {
-				self.logical_world = previous_lw;
-				self.graphical_world = GraphicalWorld::from_logical_world(&self.logical_world);
-				self.camera.set_target(&self.graphical_world.info_for_camera);
+				let redo_count = self.logical_world.redo_count;
+				if redo_count >= 1 {
+					self.logical_world = previous_lw;
+					self.logical_world.redo_count = redo_count - 1;
+					self.graphical_world = GraphicalWorld::from_logical_world(&self.logical_world);
+					self.camera.set_target(&self.graphical_world.info_for_camera);
+				}
 			}
 		}
 	}

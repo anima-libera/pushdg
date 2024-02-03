@@ -142,6 +142,7 @@ fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
 		Obj::Exit => SpriteFromSheet::Exit,
 		Obj::VisionGem => SpriteFromSheet::VisionGem,
 		Obj::Heart => SpriteFromSheet::Heart,
+		Obj::RedoHeart => SpriteFromSheet::RedoHeart,
 		Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 		Obj::Slime { .. } => SpriteFromSheet::Slime,
 	}
@@ -315,16 +316,19 @@ impl GraphicalWorld {
 					));
 				};
 			let ui_x = 15.0;
+
+			// Redo count.
+			let base_y = 20.0;
 			add_char_sprite(
-				SpriteFromSheet::Heart,
-				Vec2::new(ui_x, 20.0 + heart_y_offset)
+				SpriteFromSheet::RedoHeart,
+				Vec2::new(ui_x, base_y + heart_y_offset)
 					+ Vec2::new(heart_width, heart_height) * heart_rescale / 2.0,
 				heart_height * heart_rescale,
 				false,
 			);
 			add_char_sprite(
-				SpriteFromSheet::Digit(*hp as u8),
-				Vec2::new(ui_x, 20.0)
+				SpriteFromSheet::Digit(transition.resulting_lw.redo_count as u8),
+				Vec2::new(ui_x, base_y)
 					+ Vec2::new(char_width, char_height) / 2.0
 					+ Vec2::new(heart_width + space_width, 0.0),
 				char_height,
@@ -332,7 +336,41 @@ impl GraphicalWorld {
 			);
 			add_char_sprite(
 				SpriteFromSheet::Slash,
-				Vec2::new(ui_x, 20.0)
+				Vec2::new(ui_x, base_y)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + char_width + space_width * 2.0, 0.0),
+				char_height,
+				true,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Digit(transition.resulting_lw.max_redo_count as u8),
+				Vec2::new(ui_x, base_y)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + char_width * 2.0 + space_width * 3.0, 0.0),
+				char_height,
+				true,
+			);
+
+			// HP count.
+			let base_y = 60.0;
+			add_char_sprite(
+				SpriteFromSheet::Heart,
+				Vec2::new(ui_x, base_y + heart_y_offset)
+					+ Vec2::new(heart_width, heart_height) * heart_rescale / 2.0,
+				heart_height * heart_rescale,
+				false,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Digit(*hp as u8),
+				Vec2::new(ui_x, base_y)
+					+ Vec2::new(char_width, char_height) / 2.0
+					+ Vec2::new(heart_width + space_width, 0.0),
+				char_height,
+				true,
+			);
+			add_char_sprite(
+				SpriteFromSheet::Slash,
+				Vec2::new(ui_x, base_y)
 					+ Vec2::new(char_width, char_height) / 2.0
 					+ Vec2::new(heart_width + char_width + space_width * 2.0, 0.0),
 				char_height,
@@ -340,7 +378,7 @@ impl GraphicalWorld {
 			);
 			add_char_sprite(
 				SpriteFromSheet::Digit(*max_hp as u8),
-				Vec2::new(ui_x, 20.0)
+				Vec2::new(ui_x, base_y)
 					+ Vec2::new(char_width, char_height) / 2.0
 					+ Vec2::new(heart_width + char_width * 2.0 + space_width * 3.0, 0.0),
 				char_height,

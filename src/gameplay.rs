@@ -29,8 +29,10 @@ pub enum Obj {
 	Exit,
 	/// Gem that grants wall-through vision to the player if adjacent.
 	VisionGem,
-	/// Restore health when consumed.
+	/// Restores health when consumed.
 	Heart,
+	/// Grants a redo.
+	RedoHeart,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -147,11 +149,13 @@ impl Tile {
 #[derive(Clone)]
 pub struct LogicalWorld {
 	grid: HashMap<IVec2, Tile>,
+	pub redo_count: i32,
+	pub max_redo_count: i32,
 }
 
 impl LogicalWorld {
 	pub fn new_empty() -> LogicalWorld {
-		LogicalWorld { grid: HashMap::new() }
+		LogicalWorld { grid: HashMap::new(), redo_count: 3, max_redo_count: 9 }
 	}
 
 	pub fn place_tile(&mut self, coords: IVec2, tile: Tile) {
@@ -418,6 +422,8 @@ impl LogicalWorld {
 			Some(InteractionConsequences::Mine)
 		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::Heart)) {
 			Some(InteractionConsequences::Heal)
+		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::RedoHeart)) {
+			Some(InteractionConsequences::GainARedo)
 		} else if let Some(target_hp) = dst_obj.hp() {
 			let damages = src_obj.damages();
 			if target_hp <= damages {
@@ -473,7 +479,9 @@ impl LogicalWorld {
 										true
 									},
 									InteractionConsequences::Exit { .. } => true,
-									InteractionConsequences::Heal => true,
+									InteractionConsequences::Heal | InteractionConsequences::GainARedo => {
+										true
+									},
 									InteractionConsequences::NonLethalHit { .. } => false,
 								};
 							}
@@ -573,6 +581,11 @@ impl LogicalWorld {
 						}
 						logical_events.push(LogicalEvent::Healed { obj: healed_obj.clone(), at: coords });
 					},
+					InteractionConsequences::GainARedo => {
+						let redo_heart_obj = previous_obj.take().unwrap();
+						res_lw.redo_count = (self.redo_count + 1).clamp(0, self.max_redo_count);
+						logical_events.push(LogicalEvent::RedoGained { obj: redo_heart_obj, at: coords });
+					},
 					InteractionConsequences::NonLethalHit { .. } => {
 						unreachable!(
 							"If there is a non-killed target, then the push would have been a failure"
@@ -591,6 +604,7 @@ impl LogicalWorld {
 				InteractionConsequences::Kill { .. }
 				| InteractionConsequences::Mine
 				| InteractionConsequences::Heal
+				| InteractionConsequences::GainARedo
 				| InteractionConsequences::Exit { .. } => {
 					unreachable!(
 						"If there is no or no more target, \
@@ -621,6 +635,8 @@ enum InteractionConsequences {
 	},
 	/// Bunny ate a heart and is healed.
 	Heal,
+	/// Bunny ate a redo heart.
+	GainARedo,
 }
 
 struct MoveAttemptConsequences {
@@ -644,6 +660,7 @@ pub enum LogicalEvent {
 	Killed { obj: Obj, at: IVec2, damages: i32 },
 	Mined { obj: Obj, at: IVec2 },
 	Healed { obj: Obj, at: IVec2 },
+	RedoGained { obj: Obj, at: IVec2 },
 	Exit { obj: Obj, from: IVec2, to: IVec2 },
 }
 
