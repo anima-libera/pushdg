@@ -104,6 +104,7 @@ impl Generator {
 				(3, Some(Obj::VisionGem)),
 				(1, Some(Obj::Heart)),
 				(2, Some(Obj::RedoHeart)),
+				(3, Some(Obj::Key)),
 				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
@@ -131,7 +132,12 @@ impl Generator {
 					if ((coords.x + coords.y) % v == 0 && coords.x % 2 == 0 && randint(0, 6 - 1) != 0)
 						|| ((coords.x + coords.y) % 2 != v && randint(0, 10 - 1) == 0)
 					{
-						self.lw.place_tile(coords, Tile::obj(Obj::Wall));
+						let wall = if randint(0, 30) == 0 {
+							Obj::Door
+						} else {
+							Obj::Wall
+						};
+						self.lw.place_tile(coords, Tile::obj(wall));
 					}
 				}
 			}
@@ -161,6 +167,10 @@ impl Generator {
 		for _ in 0..number_of_corridors {
 			let start = center + direction.perp() * randint(-dimensions.x / 2, dimensions.x / 2);
 			self.generate_corridor(start, direction, (dimensions + space).x, 1);
+			if number_of_corridors == 1 && randint(0, 3) == 0 {
+				let coords = start + direction * ((dimensions + space).x / 2);
+				self.lw.place_tile(coords, Tile::obj(Obj::Door));
+			}
 		}
 	}
 

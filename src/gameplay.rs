@@ -33,6 +33,10 @@ pub enum Obj {
 	Heart,
 	/// Grants a redo.
 	RedoHeart,
+	/// Like a wall but can be opened by a key.
+	Door,
+	/// Can open a door.
+	Key,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -49,7 +53,7 @@ impl Obj {
 	/// pusher succeeds to push (force >= total mass) or fails to push (force < total mass).
 	fn mass(&self) -> i32 {
 		match self {
-			Obj::Wall => 10,
+			Obj::Wall | Obj::Door => 10,
 			Obj::Slime { .. } | Obj::Bunny { .. } => 3,
 			_ => 1,
 		}
@@ -420,6 +424,8 @@ impl LogicalWorld {
 			Some(InteractionConsequences::Exit { at: dst_coords })
 		} else if matches!((src_obj, dst_obj), (Obj::Pickaxe, Obj::Wall)) {
 			Some(InteractionConsequences::Mine)
+		} else if matches!((src_obj, dst_obj), (Obj::Key, Obj::Door)) {
+			Some(InteractionConsequences::KeyOpenDoor)
 		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::Heart)) {
 			Some(InteractionConsequences::Heal)
 		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::RedoHeart)) {
@@ -472,7 +478,9 @@ impl LogicalWorld {
 								self.what_would_happen_if_interact(src_obj, dst_obj, coords);
 							if let Some(final_interaction) = final_interaction.as_ref() {
 								break 'success match final_interaction {
-									InteractionConsequences::Mine | InteractionConsequences::Kill { .. } => {
+									InteractionConsequences::Mine
+									| InteractionConsequences::KeyOpenDoor
+									| InteractionConsequences::Kill { .. } => {
 										// The target is killed, and as a design choice I find it cool
 										// that since now what was blocking is no more then the push
 										// happens now.
@@ -560,6 +568,16 @@ impl LogicalWorld {
 						let target_obj = previous_obj.take().unwrap();
 						logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
 					},
+					InteractionConsequences::KeyOpenDoor => {
+						let key_obj = res_lw.grid.get_mut(&coords).unwrap().obj.take().unwrap();
+						let door_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::DoorOpenedWithKey {
+							key_obj,
+							door_obj,
+							from: coords - direction,
+							to: coords,
+						});
+					},
 					InteractionConsequences::Exit { .. } => {
 						std::mem::swap(
 							&mut previous_obj,
@@ -603,6 +621,7 @@ impl LogicalWorld {
 				},
 				InteractionConsequences::Kill { .. }
 				| InteractionConsequences::Mine
+				| InteractionConsequences::KeyOpenDoor
 				| InteractionConsequences::Heal
 				| InteractionConsequences::GainARedo
 				| InteractionConsequences::Exit { .. } => {
@@ -628,6 +647,8 @@ enum InteractionConsequences {
 	},
 	/// Pickaxe mining a wall for example.
 	Mine,
+	/// A key is used to open a door, being consumed in the operation.
+	KeyOpenDoor,
 	/// Exit the level through an exit door.
 	Exit {
 		/// Coords of the exit door through which an object exits.
@@ -654,14 +675,46 @@ struct MoveAttemptConsequences {
 /// can be useful to animate the transition.
 #[derive(Clone)]
 pub enum LogicalEvent {
-	Move { from: IVec2, to: IVec2 },
-	FailToMove { from: IVec2, to: IVec2 },
-	Hit { at: IVec2, damages: i32 },
-	Killed { obj: Obj, at: IVec2, damages: i32 },
-	Mined { obj: Obj, at: IVec2 },
-	Healed { obj: Obj, at: IVec2 },
-	RedoGained { obj: Obj, at: IVec2 },
-	Exit { obj: Obj, from: IVec2, to: IVec2 },
+	Move {
+		from: IVec2,
+		to: IVec2,
+	},
+	FailToMove {
+		from: IVec2,
+		to: IVec2,
+	},
+	Hit {
+		at: IVec2,
+		damages: i32,
+	},
+	Killed {
+		obj: Obj,
+		at: IVec2,
+		damages: i32,
+	},
+	Mined {
+		obj: Obj,
+		at: IVec2,
+	},
+	DoorOpenedWithKey {
+		key_obj: Obj,
+		door_obj: Obj,
+		from: IVec2,
+		to: IVec2,
+	},
+	Healed {
+		obj: Obj,
+		at: IVec2,
+	},
+	RedoGained {
+		obj: Obj,
+		at: IVec2,
+	},
+	Exit {
+		obj: Obj,
+		from: IVec2,
+		to: IVec2,
+	},
 }
 
 /// When the player or agents move or something happens in the game,

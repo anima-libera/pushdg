@@ -139,6 +139,8 @@ fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
 		Obj::Shield => SpriteFromSheet::Shield,
 		Obj::Pickaxe => SpriteFromSheet::Pickaxe,
 		Obj::Rock => SpriteFromSheet::Rock,
+		Obj::Door => SpriteFromSheet::Door,
+		Obj::Key => SpriteFromSheet::Key,
 		Obj::Exit => SpriteFromSheet::Exit,
 		Obj::VisionGem => SpriteFromSheet::VisionGem,
 		Obj::Heart => SpriteFromSheet::Heart,
@@ -280,6 +282,44 @@ impl GraphicalWorld {
 							Animations::new(
 								Some(MoveAnimation::new_disappear_after(
 									from.as_vec2(),
+									to.as_vec2(),
+								)),
+								None,
+								None,
+								None,
+							),
+						));
+					}
+				},
+				LogicalEvent::DoorOpenedWithKey { key_obj, door_obj, from, to } => {
+					if transition.resulting_lw.tile(*from).is_some_and(|tile| tile.visible) {
+						gw.add_sprite(DisplayedSprite::new(
+							obj_to_sprite(key_obj),
+							to.as_vec2(),
+							DepthLayer::AnimatedObj,
+							true,
+							None,
+							None,
+							Animations::new(
+								Some(MoveAnimation::new_disappear_after(
+									from.as_vec2(),
+									to.as_vec2(),
+								)),
+								None,
+								None,
+								None,
+							),
+						));
+						gw.add_sprite(DisplayedSprite::new(
+							obj_to_sprite(door_obj),
+							to.as_vec2(),
+							DepthLayer::AnimatedObj,
+							true,
+							None,
+							None,
+							Animations::new(
+								Some(MoveAnimation::new_disappear_after(
+									to.as_vec2(),
 									to.as_vec2(),
 								)),
 								None,
