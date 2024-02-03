@@ -64,7 +64,7 @@ impl Obj {
 	fn damages(&self) -> i32 {
 		match self {
 			Obj::Sword => 3,
-			Obj::Shield | Obj::Exit => 0,
+			Obj::Shield | Obj::Exit | Obj::Heart | Obj::RedoHeart => 0,
 			Obj::Slime { .. } => 2,
 			_ => 1,
 		}
