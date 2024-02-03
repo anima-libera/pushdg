@@ -5,7 +5,9 @@ Roguelike centered around sokoban-like puzzle mechanics.
 
 You don't have a sword or a shield in your inventory. You don't have an inventory. You push the sword or the shield or both in front of you across the rooms, like boxes in a sokoban. There may be HP and damages, but this dungeon crawler is more about puzzle-like carful navigation and manipulation of the environment than looking at dozens of rpg stats. You may lose all your HP, but you may also lose by ending up blocked by the puzzle-like machanics. Your *redo*s are an other kind of HP that are just as important, if not more.
 
-## Implemented
+[Some pics](./pics/)
+
+## Implemented features
 
 - Pushing, respecting object mass, pusher force, and hitting with what is pushed.
 - Enemies, moving when it is their turn towards the player with a trivial AI.
