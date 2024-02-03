@@ -155,13 +155,23 @@ impl Generator {
 		let space = IVec2::new(1, 1);
 		let top_left = room_grid_coords * (dimensions + space);
 		let center = top_left + dimensions / 2;
-		self.generate_corridor(center, direction, (dimensions + space).x, 1);
+		let number_of_corridors = if randint(0, 4) == 0 {
+			0
+		} else if randint(0, 3) == 0 {
+			randint(2, 6)
+		} else {
+			1
+		};
+		for _ in 0..number_of_corridors {
+			let start = center + direction.perp() * randint(-dimensions.x / 2, dimensions.x / 2);
+			self.generate_corridor(start, direction, (dimensions + space).x, 1);
+		}
 	}
 
 	fn generate_level(&mut self) {
 		// Grid layout.
-		let grid_w_radius = 2;
-		let grid_h_radius = 2;
+		let grid_w_radius = 3;
+		let grid_h_radius = 3;
 		let grid_w = grid_w_radius * 2 + 1;
 		let grid_h = grid_h_radius * 2 + 1;
 		let grid_x_inf = -grid_w_radius;
