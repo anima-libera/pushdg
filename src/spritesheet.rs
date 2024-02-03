@@ -71,8 +71,8 @@ impl SpriteFromSheet {
 			let y = 16;
 			return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
 		} else if let SpriteFromSheet::Slash = self {
-			let x = 0;
-			let y = 16 + 6;
+			let x = 10 * 4;
+			let y = 16;
 			return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
 		}
 
