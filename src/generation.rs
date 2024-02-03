@@ -93,22 +93,17 @@ impl Generator {
 				top_left + dimensions / 2 + IVec2::new(2, 0),
 				Tile::obj(Obj::Sword),
 			);
-
-			// Test.
-			self.lw.place_tile(
-				top_left + dimensions / 2 + IVec2::new(0, -2),
-				Tile::obj(Obj::VisionGem),
-			);
 		} else {
 			// Weighted table of object spawn.
 			let obj_table = [
-				(100, None),
-				(5, Some(Obj::Rock)),
-				(1, Some(Obj::Sword)),
-				(1, Some(Obj::Shield)),
-				(1, Some(Obj::Pickaxe)),
-				(1, Some(Obj::VisionGem)),
-				(5, Some(Obj::Slime { hp: 5, move_token: false })),
+				(500, None),
+				(25, Some(Obj::Rock)),
+				(5, Some(Obj::Sword)),
+				(4, Some(Obj::Shield)),
+				(2, Some(Obj::Pickaxe)),
+				(3, Some(Obj::VisionGem)),
+				(1, Some(Obj::Heart)),
+				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
 			// Fill the room.

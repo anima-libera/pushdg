@@ -29,6 +29,8 @@ pub enum Obj {
 	Exit,
 	/// Gem that grants wall-through vision to the player if adjacent.
 	VisionGem,
+	/// Restore health when consumed.
+	Heart,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -410,6 +412,8 @@ impl LogicalWorld {
 			Some(InteractionConsequences::Exit { at: dst_coords })
 		} else if matches!((src_obj, dst_obj), (Obj::Pickaxe, Obj::Wall)) {
 			Some(InteractionConsequences::Mine)
+		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::Heart)) {
+			Some(InteractionConsequences::Heal)
 		} else if let Some(target_hp) = dst_obj.hp() {
 			let damages = src_obj.damages();
 			if target_hp <= damages {
@@ -465,6 +469,7 @@ impl LogicalWorld {
 										true
 									},
 									InteractionConsequences::Exit { .. } => true,
+									InteractionConsequences::Heal => true,
 									InteractionConsequences::NonLethalHit { .. } => false,
 								};
 							}
@@ -555,6 +560,15 @@ impl LogicalWorld {
 							to: coords,
 						});
 					},
+					InteractionConsequences::Heal => {
+						let _heart_obj = previous_obj.take().unwrap();
+						let healed_obj = &mut res_lw.grid.get_mut(&coords).unwrap().obj.as_mut().unwrap();
+						match healed_obj {
+							Obj::Bunny { hp, max_hp } => *hp = *max_hp,
+							_ => unreachable!("Only a bunny interacting with a heart can trigger a heal"),
+						}
+						logical_events.push(LogicalEvent::Healed { obj: healed_obj.clone(), at: coords });
+					},
 					InteractionConsequences::NonLethalHit { .. } => {
 						unreachable!(
 							"If there is a non-killed target, then the push would have been a failure"
@@ -572,6 +586,7 @@ impl LogicalWorld {
 				},
 				InteractionConsequences::Kill { .. }
 				| InteractionConsequences::Mine
+				| InteractionConsequences::Heal
 				| InteractionConsequences::Exit { .. } => {
 					unreachable!(
 						"If there is no or no more target, \
@@ -600,6 +615,8 @@ enum InteractionConsequences {
 		/// Coords of the exit door through which an object exits.
 		at: IVec2,
 	},
+	/// Bunny ate a heart and is healed.
+	Heal,
 }
 
 struct MoveAttemptConsequences {
@@ -622,6 +639,7 @@ pub enum LogicalEvent {
 	Hit { at: IVec2, damages: i32 },
 	Killed { obj: Obj, at: IVec2, damages: i32 },
 	Mined { obj: Obj, at: IVec2 },
+	Healed { obj: Obj, at: IVec2 },
 	Exit { obj: Obj, from: IVec2, to: IVec2 },
 }
 
