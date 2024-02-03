@@ -42,7 +42,8 @@ impl Game {
 		let gw = GraphicalWorld::from_logical_world(&lw);
 		let spritesheet_stuff = SpritesheetStuff::new(ctx)?;
 		let phase = Phase::WaitingForPlayerToMakeAMove;
-		let camera = Camera::new();
+		let mut camera = Camera::new();
+		camera.set_initial_target(&gw.info_for_camera);
 		Ok(Game {
 			logical_world: lw,
 			phase,

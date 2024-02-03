@@ -662,4 +662,12 @@ impl Camera {
 			self.target_position = player_position;
 		}
 	}
+
+	/// Sets the target on some initial world state via some info about that state.
+	pub fn set_initial_target(&mut self, info: &InfoForCamera) {
+		if let Some(player_position) = info.player_position {
+			self.target_position = player_position;
+			self.current_position = player_position;
+		}
+	}
 }
