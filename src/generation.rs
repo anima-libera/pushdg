@@ -1,7 +1,7 @@
 //! Procedural generation of levels.
 
 use ggez::glam::IVec2;
-use rand::{thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 
 use crate::gameplay::{LogicalWorld, Obj, Tile};
 
@@ -58,94 +58,48 @@ impl Generator {
 				Tile::obj(Obj::Wall),
 			);
 			for i in 1..=width {
-				self.lw.place_tile(one_wall - direction.perp() * i, Tile::floor());
+				let coords = one_wall - direction.perp() * i;
+				if self
+					.lw
+					.tile(coords)
+					.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Wall)))
+				{
+					self.lw.place_tile(coords, Tile::floor());
+				} else {
+					self.lw.place_tile_no_overwrite(coords, Tile::floor());
+				}
 			}
 			coords += direction;
 		}
 	}
 
-	fn generate_corridor_then_room(&mut self, start: IVec2, direction: IVec2, propagation: i32) {
-		let already_room_forward = 'already: {
-			for i in 1..20 {
-				if self.lw.tile(start + direction * i).is_some() {
-					break 'already true;
-				}
-			}
-			false
-		};
-		if already_room_forward {
-			let mut coords = start;
-			loop {
-				let end = self.lw.tile(coords + direction).is_some();
-				self.generate_corridor(coords, direction, 2, 1);
-				self.lw.place_tile(coords, Tile::floor());
-				if end {
-					break;
-				}
-				coords += direction;
-			}
-			return;
-		}
-
-		let corridor_length = randint(1, 3);
-		self.generate_corridor(start, direction, corridor_length, 1);
-		let room_entry = start + direction * corridor_length;
-		let measure_forward = randint(4, 9);
-		let measure_perpward = randint(2, 5);
-		let measure_minusperpward = randint(2, 5);
-		let in_room_back = room_entry + direction * measure_forward;
-		let in_room_perp = room_entry + direction.perp() * measure_perpward;
-		let in_room_minusperp = room_entry - direction.perp() * measure_minusperpward;
-		let top_left = in_room_back.min(in_room_perp).min(in_room_minusperp);
-		let bottom_right = in_room_back.max(in_room_perp).max(in_room_minusperp);
-		let dimensions = bottom_right - top_left + IVec2::new(1, 1);
-
+	fn generate_grid_room(&mut self, room_grid_coords: IVec2, is_exit_room: bool) {
+		let dimensions = IVec2::new(9, 9);
+		let space = IVec2::new(1, 1);
+		let top_left = room_grid_coords * (dimensions + space);
 		self.generate_empty_room(top_left, dimensions);
-		self.lw.place_tile(room_entry, Tile::floor());
 
-		if propagation >= 1 {
-			if randint(0, 1) == 0 {
-				let exit = in_room_perp + direction * randint(1, measure_forward - 1);
-				self.generate_corridor_then_room(exit, direction.perp(), propagation - 1);
-			}
-			if randint(0, 1) == 0 {
-				let exit = in_room_perp + direction * randint(1, measure_forward - 1);
-				self.generate_corridor_then_room(exit, -direction.perp(), propagation - 1);
-			}
-			if randint(0, 2) == 0 {
-				self.generate_corridor_then_room(in_room_back, direction, propagation - 1);
-			}
-		}
-	}
+		let is_starting_room = room_grid_coords == IVec2::new(0, 0);
+		if is_starting_room {
+			self.lw.place_tile(
+				top_left + dimensions / 2,
+				Tile::obj(Obj::Bunny { hp: 5, max_hp: 5 }),
+			);
+			self.lw.place_tile(
+				top_left + dimensions / 2 + IVec2::new(-2, 0),
+				Tile::obj(Obj::Shield),
+			);
+			self.lw.place_tile(
+				top_left + dimensions / 2 + IVec2::new(2, 0),
+				Tile::obj(Obj::Sword),
+			);
 
-	fn generate_level(&mut self) {
-		// Starting room.
-		self.generate_empty_room(IVec2::new(-4, -4), IVec2::new(9, 9));
-		self.lw.place_tile(IVec2::new(0, 0), Tile::obj(Obj::Bunny { hp: 5, max_hp: 5 }));
-		self.lw.place_tile(IVec2::new(-2, 0), Tile::obj(Obj::Shield));
-		self.lw.place_tile(IVec2::new(2, 0), Tile::obj(Obj::Sword));
-		self.generate_corridor(IVec2::new(4, 0), IVec2::new(1, 0), 4, 1);
-
-		// Test.
-		self.lw.place_tile(IVec2::new(0, -2), Tile::obj(Obj::VisionGem));
-		self.generate_corridor_then_room(IVec2::new(-4, 0), IVec2::new(-1, 0), 8);
-
-		// Succession of rooms.
-		let mut room_x = 8;
-		let mut entry_y = 0;
-		let room_count = 6;
-		for room_index in 0..room_count {
-			let is_last_room = room_index == room_count - 1;
-
-			// Room dimensions.
-			let up = randint(1, 5) + 2;
-			let down = randint(1, 5) + 2;
-			let right = randint(2, 8) + 2;
-			let top_left = IVec2::new(room_x, entry_y - up);
-			let dimensions = IVec2::new(right, up + 1 + down);
-			self.generate_empty_room(top_left, dimensions);
-			self.lw.place_tile(IVec2::new(room_x, entry_y), Tile::floor());
-
+			// Test.
+			self.lw.place_tile(
+				top_left + dimensions / 2 + IVec2::new(0, -2),
+				Tile::obj(Obj::VisionGem),
+			);
+		} else {
 			// Weighted table of object spawn.
 			let obj_table = [
 				(100, None),
@@ -175,7 +129,7 @@ impl Generator {
 				}
 			}
 
-			if randint(0, 6 - 1) == 0 {
+			if randint(0, 3) == 0 {
 				let v = randint(2, 4);
 				for coords in filled_inner_rect(top_left, dimensions) {
 					if ((coords.x + coords.y) % v == 0 && coords.x % 2 == 0 && randint(0, 6 - 1) != 0)
@@ -185,28 +139,57 @@ impl Generator {
 					}
 				}
 			}
+		}
 
-			if is_last_room {
-				// Exit.
-				let x = top_left.x + randint(0, dimensions.x - 1);
-				let y = top_left.y + randint(0, dimensions.y - 1);
-				let coords = IVec2::new(x, y);
-				self.lw.place_tile(coords, Tile::obj(Obj::Exit));
+		if is_exit_room {
+			// Exit.
+			let x = top_left.x + randint(0, dimensions.x - 1);
+			let y = top_left.y + randint(0, dimensions.y - 1);
+			let coords = IVec2::new(x, y);
+			self.lw.place_tile(coords, Tile::obj(Obj::Exit));
+		}
+	}
+
+	fn generate_grid_corridor(&mut self, room_grid_coords: IVec2, direction: IVec2) {
+		let dimensions = IVec2::new(9, 9);
+		let space = IVec2::new(1, 1);
+		let top_left = room_grid_coords * (dimensions + space);
+		let center = top_left + dimensions / 2;
+		self.generate_corridor(center, direction, (dimensions + space).x, 1);
+	}
+
+	fn generate_level(&mut self) {
+		// Grid layout.
+		let grid_w_radius = 2;
+		let grid_h_radius = 2;
+		let grid_w = grid_w_radius * 2 + 1;
+		let grid_h = grid_h_radius * 2 + 1;
+		let grid_x_inf = -grid_w_radius;
+		let grid_x_sup = grid_w_radius;
+		let grid_y_inf = -grid_h_radius;
+		let grid_y_sup = grid_h_radius;
+		let exit_rooms: Vec<_> = line_rect(
+			IVec2::new(grid_x_inf, grid_y_inf),
+			IVec2::new(grid_w, grid_h),
+		)
+		.choose_multiple(&mut thread_rng(), 3)
+		.copied()
+		.collect();
+		for grid_y in grid_y_inf..=grid_y_sup {
+			for grid_x in grid_x_inf..=grid_x_sup {
+				let room_grid_coords = IVec2::new(grid_x, grid_y);
+				self.generate_grid_room(room_grid_coords, exit_rooms.contains(&room_grid_coords));
 			}
-
-			if !is_last_room {
-				// Exit corridor to next room.
-				let exit_x = room_x + right - 1;
-				let exit_y = randint(top_left.y + 1, (top_left.y + dimensions.y - 1) - 1);
-				let corridor_length = randint(1, 4);
-				self.generate_corridor(
-					IVec2::new(exit_x, exit_y),
-					IVec2::new(1, 0),
-					corridor_length,
-					2,
-				);
-				room_x = exit_x + corridor_length - 1;
-				entry_y = exit_y;
+		}
+		for grid_y in grid_y_inf..=grid_y_sup {
+			for grid_x in grid_x_inf..=grid_x_sup {
+				let room_grid_coords = IVec2::new(grid_x, grid_y);
+				if grid_x < grid_x_sup {
+					self.generate_grid_corridor(room_grid_coords, IVec2::new(1, 0));
+				}
+				if grid_y < grid_y_sup {
+					self.generate_grid_corridor(room_grid_coords, IVec2::new(0, 1));
+				}
 			}
 		}
 	}
