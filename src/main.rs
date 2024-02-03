@@ -30,6 +30,7 @@ enum Phase {
 struct Game {
 	/// The current logical state of the world.
 	logical_world: LogicalWorld,
+	previous_logical_worlds: Vec<LogicalWorld>,
 	phase: Phase,
 	graphical_world: GraphicalWorld,
 	camera: Camera,
@@ -46,6 +47,7 @@ impl Game {
 		camera.set_initial_target(&gw.info_for_camera);
 		Ok(Game {
 			logical_world: lw,
+			previous_logical_worlds: vec![],
 			phase,
 			graphical_world: gw,
 			camera,
@@ -56,6 +58,7 @@ impl Game {
 	fn player_move(&mut self, direction: IVec2) {
 		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
 			let mut transition = self.logical_world.player_move(direction);
+			self.previous_logical_worlds.push(self.logical_world.clone());
 			self.logical_world = transition.resulting_lw.clone();
 			self.graphical_world = GraphicalWorld::from_logical_world_transition(&transition);
 			self.camera.set_target(&self.graphical_world.info_for_camera);
@@ -68,6 +71,16 @@ impl Game {
 				transition = next_transition;
 			}
 			self.phase = Phase::WaitingForAnimationsToFinish(transitions);
+		}
+	}
+
+	fn redo(&mut self) {
+		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
+			if let Some(previous_lw) = self.previous_logical_worlds.pop() {
+				self.logical_world = previous_lw;
+				self.graphical_world = GraphicalWorld::from_logical_world(&self.logical_world);
+				self.camera.set_target(&self.graphical_world.info_for_camera);
+			}
 		}
 	}
 }
@@ -108,6 +121,7 @@ impl EventHandler for Game {
 				K::Q | K::A | K::Left => self.player_move(IVec2::new(-1, 0)),
 				K::S | K::Down => self.player_move(IVec2::new(0, 1)),
 				K::D | K::Right => self.player_move(IVec2::new(1, 0)),
+				K::R | K::Back => self.redo(),
 				_ => {},
 			}
 		}
