@@ -176,6 +176,10 @@ impl LogicalWorld {
 		})
 	}
 
+	pub fn has_player(&self) -> bool {
+		self.player_coords().is_some()
+	}
+
 	/// Computes the visibility of the tiles.
 	fn updated_visibility(mut self) -> LogicalWorld {
 		// TODO: Make this whole function more readable.

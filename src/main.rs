@@ -56,7 +56,8 @@ impl Game {
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
-		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) {
+		if matches!(self.phase, Phase::WaitingForPlayerToMakeAMove) && self.logical_world.has_player()
+		{
 			let mut transition = self.logical_world.player_move(direction);
 			self.previous_logical_worlds.push(self.logical_world.clone());
 			self.logical_world = transition.resulting_lw.clone();
