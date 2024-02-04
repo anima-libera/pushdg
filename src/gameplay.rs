@@ -37,6 +37,8 @@ pub enum Obj {
 	Door,
 	/// Can open a door.
 	Key,
+	/// Pulls and is pulled.
+	Rope,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -453,6 +455,7 @@ impl LogicalWorld {
 		direction: IVec2,
 		force: i32,
 	) -> MoveAttemptConsequences {
+		// Push.
 		let mut coords = mover_coords;
 		let mut remaining_force = force;
 		let mut length = 0;
@@ -508,7 +511,37 @@ impl LogicalWorld {
 		if final_interaction.is_some() {
 			length -= length_removed_due_to_interaction;
 		}
-		MoveAttemptConsequences { success, length, final_interaction }
+		let non_pulled_length = length;
+		// Pull.
+		let mut coords = mover_coords;
+		let mut remaining_force = force;
+		let mut pulled_length = 0;
+		let mut can_pull_next = false;
+		loop {
+			coords -= direction;
+			if let Some(dst_tile) = self.grid.get(&coords) {
+				if let Some(dst_obj) = dst_tile.obj.as_ref() {
+					if matches!(dst_obj, Obj::Rope) || can_pull_next {
+						can_pull_next = false;
+						remaining_force -= dst_obj.mass();
+						if remaining_force < 0 {
+							break;
+						}
+						pulled_length += 1;
+						if matches!(dst_obj, Obj::Rope) {
+							can_pull_next = true;
+						}
+					} else {
+						break;
+					}
+				} else {
+					break;
+				}
+			} else {
+				break;
+			}
+		}
+		MoveAttemptConsequences { success, non_pulled_length, pulled_length, final_interaction }
 	}
 
 	/// Returns the transition of the object at the given coords trying to move
@@ -516,11 +549,11 @@ impl LogicalWorld {
 	fn try_to_move(&self, mover_coords: IVec2, direction: IVec2, force: i32) -> LogicalTransition {
 		let mut res_lw = self.clone();
 		let mut logical_events = vec![];
-		let MoveAttemptConsequences { success, length, final_interaction } =
+		let MoveAttemptConsequences { success, non_pulled_length, pulled_length, final_interaction } =
 			self.what_would_happen_if_try_to_move(mover_coords, direction, force);
 		let mut coords = mover_coords;
 		let mut previous_obj = None;
-		for _ in 0..length {
+		for _ in 0..non_pulled_length {
 			if success {
 				// The push is successful so each object in the chain is replaced
 				// by the previous object, and gets to replace the next object.
@@ -632,6 +665,16 @@ impl LogicalWorld {
 				},
 			}
 		}
+		// The pulling.
+		if success {
+			let mut coords = mover_coords;
+			for _ in 0..pulled_length {
+				coords -= direction;
+				let obj = res_lw.grid.get_mut(&coords).unwrap().obj.take();
+				res_lw.grid.get_mut(&(coords + direction)).unwrap().obj = obj;
+				logical_events.push(LogicalEvent::Move { from: coords, to: coords + direction });
+			}
+		}
 		LogicalTransition { resulting_lw: res_lw, logical_events }
 	}
 }
@@ -663,8 +706,10 @@ enum InteractionConsequences {
 struct MoveAttemptConsequences {
 	/// Will some objects actually move or will they just fail to move?
 	success: bool,
-	/// The number of object that move or fail to move.
-	length: i32,
+	/// The number of object that move or fail to move, not considering what is pulled.
+	non_pulled_length: i32,
+	/// The number of objects that move by being pulled.
+	pulled_length: i32,
 	/// The frontmost object to move may interact with an other object in front of it,
 	/// if an interaction occurs and its consequences are also consequences of the move.
 	final_interaction: Option<InteractionConsequences>,

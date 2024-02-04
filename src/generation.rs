@@ -105,6 +105,7 @@ impl Generator {
 				(1, Some(Obj::Heart)),
 				(2, Some(Obj::RedoHeart)),
 				(3, Some(Obj::Key)),
+				(3, Some(Obj::Rope)),
 				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();

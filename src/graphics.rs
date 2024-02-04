@@ -141,6 +141,7 @@ fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
 		Obj::Rock => SpriteFromSheet::Rock,
 		Obj::Door => SpriteFromSheet::Door,
 		Obj::Key => SpriteFromSheet::Key,
+		Obj::Rope => SpriteFromSheet::Rope,
 		Obj::Exit => SpriteFromSheet::Exit,
 		Obj::VisionGem => SpriteFromSheet::VisionGem,
 		Obj::Heart => SpriteFromSheet::Heart,
