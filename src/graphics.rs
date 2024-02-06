@@ -148,6 +148,8 @@ fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
 		Obj::RedoHeart => SpriteFromSheet::RedoHeart,
 		Obj::Bunny { .. } => SpriteFromSheet::Bunny,
 		Obj::Slime { .. } => SpriteFromSheet::Slime,
+		Obj::Shroomer { .. } => SpriteFromSheet::Shroomer,
+		Obj::Shroom => SpriteFromSheet::Shroom,
 	}
 }
 

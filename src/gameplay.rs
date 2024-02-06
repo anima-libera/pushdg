@@ -47,6 +47,14 @@ pub enum Obj {
 		/// This token indicates that this agent has yet to make a move.
 		move_token: bool,
 	},
+	/// An other enemy, mushroom themed.
+	Shroomer {
+		hp: i32,
+		/// This token indicates that this agent has yet to make a move.
+		move_token: bool,
+	},
+	/// Mushroom. A production of the shroomer.
+	Shroom,
 }
 
 impl Obj {
@@ -96,27 +104,26 @@ impl Obj {
 
 	/// Some agents may be neutral, this only flags agents that are hostile to the player.
 	fn is_enemy(&self) -> bool {
-		matches!(self, Obj::Slime { .. })
+		matches!(self, Obj::Slime { .. } | Obj::Shroomer { .. })
 	}
 
 	fn give_move_token(&mut self) {
-		#[allow(clippy::single_match)]
 		match self {
-			Obj::Slime { move_token, .. } => *move_token = true,
+			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => *move_token = true,
 			_ => {},
 		}
 	}
 
 	fn has_move_token(&self) -> bool {
 		match self {
-			Obj::Slime { move_token, .. } => *move_token,
+			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => *move_token,
 			_ => false,
 		}
 	}
 
 	fn take_move_token(&mut self) -> bool {
 		match self {
-			Obj::Slime { move_token, .. } => {
+			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => {
 				let had_move_token = *move_token;
 				*move_token = false;
 				had_move_token
@@ -674,6 +681,13 @@ impl LogicalWorld {
 				res_lw.grid.get_mut(&(coords + direction)).unwrap().obj = obj;
 				logical_events.push(LogicalEvent::Move { from: coords, to: coords + direction });
 			}
+		}
+		// Shroomer tries to shroom.
+		if self.grid.get(&mover_coords).is_some_and(|tile| {
+			tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Shroomer { .. }))
+				&& res_lw.grid.get(&mover_coords).is_some_and(|tile| tile.obj.as_ref().is_none())
+		}) {
+			res_lw.grid.get_mut(&mover_coords).unwrap().obj = Some(Obj::Shroom);
 		}
 		LogicalTransition { resulting_lw: res_lw, logical_events }
 	}
