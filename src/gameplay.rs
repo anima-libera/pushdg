@@ -419,6 +419,26 @@ impl LogicalWorld {
 		{
 			return None;
 		}
+		// No vision through vision-blocking objects.
+		let vision_blocked = {
+			let mut coords = agent_coords;
+			loop {
+				coords += direction;
+				if coords == target_coords {
+					break false;
+				} else if self
+					.grid
+					.get(&coords)
+					.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision()))
+				{
+					break true;
+				}
+			}
+		};
+		if vision_blocked {
+			return None;
+		}
+		// All good, can move forward!
 		Some(direction)
 	}
 
