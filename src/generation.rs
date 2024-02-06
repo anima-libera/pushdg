@@ -83,7 +83,7 @@ impl Generator {
 		if is_starting_room {
 			self.lw.place_tile(
 				top_left + dimensions / 2,
-				Tile::obj(Obj::Bunny { hp: 5, max_hp: 5 }),
+				Tile::obj(Obj::Bunny { hp: 7, max_hp: 7 }),
 			);
 			self.lw.place_tile(
 				top_left + dimensions / 2 + IVec2::new(-2, 0),
