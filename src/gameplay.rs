@@ -79,6 +79,7 @@ impl Obj {
 			Obj::Sword => 3,
 			Obj::Shield | Obj::Exit | Obj::Heart | Obj::RedoHeart => 0,
 			Obj::Slime { .. } => 2,
+			Obj::Shroomer { .. } => 2,
 			_ => 1,
 		}
 	}
@@ -398,14 +399,32 @@ impl LogicalWorld {
 						.obj
 						.as_ref()
 						.is_some_and(|obj| matches!(obj, Obj::Shroom { .. }));
+					let is_shroomer = res_lw
+						.grid
+						.get(coords)
+						.unwrap()
+						.obj
+						.as_ref()
+						.is_some_and(|obj| matches!(obj, Obj::Shroomer { .. }));
 					let direction = if is_shroom {
 						self.shroom_ai_decision(*coords)
 					} else {
 						self.ai_decision(*coords)
 					};
 					return Some(if let Some(direction) = direction {
-						let argent_force = if is_shroom { 1 } else { 2 };
-						res_lw.try_to_move(*coords, direction, argent_force).updated_visibility()
+						let target_is_bunny = res_lw
+							.grid
+							.get(&(*coords + direction))
+							.unwrap()
+							.obj
+							.as_ref()
+							.is_some_and(|obj| matches!(obj, Obj::Bunny { .. }));
+						if is_shroom || (is_shroomer && target_is_bunny) {
+							res_lw.sacrifice_hit(*coords, direction).updated_visibility()
+						} else {
+							let argent_force = 2;
+							res_lw.try_to_move(*coords, direction, argent_force).updated_visibility()
+						}
 					} else {
 						LogicalTransition { resulting_lw: res_lw, logical_events: vec![] }
 					});
@@ -487,6 +506,8 @@ impl LogicalWorld {
 			Some(InteractionConsequences::Heal)
 		} else if matches!((src_obj, dst_obj), (Obj::Bunny { .. }, Obj::RedoHeart)) {
 			Some(InteractionConsequences::GainARedo)
+		} else if matches!(dst_obj, Obj::Shroom { .. }) {
+			Some(InteractionConsequences::StompShroom)
 		} else if let Some(target_hp) = dst_obj.hp() {
 			let damages = src_obj.damages();
 			if target_hp <= damages {
@@ -538,6 +559,7 @@ impl LogicalWorld {
 								break 'success match final_interaction {
 									InteractionConsequences::Mine
 									| InteractionConsequences::KeyOpenDoor
+									| InteractionConsequences::StompShroom
 									| InteractionConsequences::Kill { .. } => {
 										// The target is killed, and as a design choice I find it cool
 										// that since now what was blocking is no more then the push
@@ -652,6 +674,10 @@ impl LogicalWorld {
 							damages,
 						});
 					},
+					InteractionConsequences::StompShroom => {
+						let target_obj = previous_obj.take().unwrap();
+						logical_events.push(LogicalEvent::Stomped { obj: target_obj, at: coords });
+					},
 					InteractionConsequences::Mine => {
 						let target_obj = previous_obj.take().unwrap();
 						logical_events.push(LogicalEvent::Mined { obj: target_obj, at: coords });
@@ -709,6 +735,7 @@ impl LogicalWorld {
 				},
 				InteractionConsequences::Kill { .. }
 				| InteractionConsequences::Mine
+				| InteractionConsequences::StompShroom
 				| InteractionConsequences::KeyOpenDoor
 				| InteractionConsequences::Heal
 				| InteractionConsequences::GainARedo
@@ -755,6 +782,33 @@ impl LogicalWorld {
 		// Done ^^.
 		LogicalTransition { resulting_lw: res_lw, logical_events }
 	}
+
+	/// An object sacrifices itself to hit its target.
+	fn sacrifice_hit(&self, hitter_coords: IVec2, direction: IVec2) -> LogicalTransition {
+		let mut res_lw = self.clone();
+		let mut logical_events = vec![];
+		let hitter_obj = res_lw.grid.get_mut(&hitter_coords).unwrap().obj.take().unwrap();
+		let target_coords = hitter_coords + direction;
+		let damages = hitter_obj.damages();
+		logical_events.push(LogicalEvent::MoveInto {
+			obj: hitter_obj,
+			from: hitter_coords,
+			to: target_coords,
+		});
+		let target_obj = res_lw.grid.get_mut(&target_coords).unwrap().obj.as_mut().unwrap();
+		target_obj.take_damage(damages);
+		if target_obj.hp().unwrap() <= 0 {
+			logical_events.push(LogicalEvent::Killed {
+				obj: target_obj.clone(),
+				at: target_coords,
+				damages,
+			});
+			res_lw.grid.get_mut(&target_coords).unwrap().obj = None;
+		} else {
+			logical_events.push(LogicalEvent::Hit { at: target_coords, damages });
+		}
+		LogicalTransition { resulting_lw: res_lw, logical_events }
+	}
 }
 
 enum InteractionConsequences {
@@ -779,6 +833,8 @@ enum InteractionConsequences {
 	Heal,
 	/// Bunny ate a redo heart.
 	GainARedo,
+	/// Something stomps on a shroom, the poor thing.
+	StompShroom,
 }
 
 struct MoveAttemptConsequences {
@@ -837,6 +893,15 @@ pub enum LogicalEvent {
 		obj: Obj,
 		from: IVec2,
 		to: IVec2,
+	},
+	MoveInto {
+		obj: Obj,
+		from: IVec2,
+		to: IVec2,
+	},
+	Stomped {
+		obj: Obj,
+		at: IVec2,
 	},
 }
 

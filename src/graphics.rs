@@ -272,7 +272,7 @@ impl GraphicalWorld {
 						));
 					}
 				},
-				LogicalEvent::Exit { obj, from, to } => {
+				LogicalEvent::Exit { obj, from, to } | LogicalEvent::MoveInto { obj, from, to } => {
 					if transition.resulting_lw.tile(*from).is_some_and(|tile| tile.visible) {
 						let sprite_from_sheet = obj_to_sprite(obj);
 						gw.add_sprite(DisplayedSprite::new(
