@@ -108,7 +108,7 @@ impl Generator {
 				(3, Some(Obj::Rope)),
 				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 				(10, Some(Obj::Shroomer { hp: 5, move_token: false })),
-				(10, Some(Obj::Shroom)),
+				(6, Some(Obj::Shroom)),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
 			// Fill the room.
