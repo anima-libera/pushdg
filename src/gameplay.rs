@@ -54,7 +54,10 @@ pub enum Obj {
 		move_token: bool,
 	},
 	/// Mushroom. A production of the shroomer.
-	Shroom,
+	Shroom {
+		/// This token indicates that this agent has yet to make a move.
+		move_token: bool,
+	},
 }
 
 impl Obj {
@@ -83,7 +86,7 @@ impl Obj {
 	/// An object may take damages if it has some HP.
 	fn hp(&self) -> Option<i32> {
 		match self {
-			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } => Some(*hp),
+			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } | Obj::Shroomer { hp, .. } => Some(*hp),
 			_ => None,
 		}
 	}
@@ -92,7 +95,7 @@ impl Obj {
 	/// killing hits should be handled by hand.
 	fn take_damage(&mut self, damages: i32) {
 		match self {
-			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } => *hp -= damages,
+			Obj::Bunny { hp, .. } | Obj::Slime { hp, .. } | Obj::Shroomer { hp, .. } => *hp -= damages,
 			_ => {},
 		}
 	}
@@ -109,21 +112,27 @@ impl Obj {
 
 	fn give_move_token(&mut self) {
 		match self {
-			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => *move_token = true,
+			Obj::Slime { move_token, .. }
+			| Obj::Shroomer { move_token, .. }
+			| Obj::Shroom { move_token } => *move_token = true,
 			_ => {},
 		}
 	}
 
 	fn has_move_token(&self) -> bool {
 		match self {
-			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => *move_token,
+			Obj::Slime { move_token, .. }
+			| Obj::Shroomer { move_token, .. }
+			| Obj::Shroom { move_token } => *move_token,
 			_ => false,
 		}
 	}
 
 	fn take_move_token(&mut self) -> bool {
 		match self {
-			Obj::Slime { move_token, .. } | Obj::Shroomer { move_token, .. } => {
+			Obj::Slime { move_token, .. }
+			| Obj::Shroomer { move_token, .. }
+			| Obj::Shroom { move_token } => {
 				let had_move_token = *move_token;
 				*move_token = false;
 				had_move_token
@@ -382,8 +391,20 @@ impl LogicalWorld {
 				if obj.has_move_token() {
 					let mut res_lw = self.clone();
 					res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
-					return Some(if let Some(direction) = self.ai_decision(*coords) {
-						let argent_force = 2;
+					let is_shroom = res_lw
+						.grid
+						.get(coords)
+						.unwrap()
+						.obj
+						.as_ref()
+						.is_some_and(|obj| matches!(obj, Obj::Shroom { .. }));
+					let direction = if is_shroom {
+						self.shroom_ai_decision(*coords)
+					} else {
+						self.ai_decision(*coords)
+					};
+					return Some(if let Some(direction) = direction {
+						let argent_force = if is_shroom { 1 } else { 2 };
 						res_lw.try_to_move(*coords, direction, argent_force).updated_visibility()
 					} else {
 						LogicalTransition { resulting_lw: res_lw, logical_events: vec![] }
@@ -394,7 +415,7 @@ impl LogicalWorld {
 		None
 	}
 
-	/// Test simple AI.
+	/// Simple enemy AI.
 	fn ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
 		let target_coords = self.player_coords()?;
 		// Move towards the target if it is in a streaight line.
@@ -440,6 +461,13 @@ impl LogicalWorld {
 		}
 		// All good, can move forward!
 		Some(direction)
+	}
+
+	/// Shroom AI.
+	fn shroom_ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
+		let target_coords = self.player_coords()?;
+		let direction = target_coords - agent_coords;
+		(direction.x.abs() + direction.y.abs() == 1).then_some(direction)
 	}
 
 	/// If the source object was pushed into the destination object in a blocked push, then what?
@@ -707,8 +735,24 @@ impl LogicalWorld {
 			tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Shroomer { .. }))
 				&& res_lw.grid.get(&mover_coords).is_some_and(|tile| tile.obj.as_ref().is_none())
 		}) {
-			res_lw.grid.get_mut(&mover_coords).unwrap().obj = Some(Obj::Shroom);
+			let adjacent_to_shroom = 'shroom: {
+				for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+					let to_adjecent = IVec2::from(to_adjecent);
+					let adjacent_coords = mover_coords + to_adjecent;
+					if self.grid.get(&adjacent_coords).is_some_and(|tile| {
+						tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Shroom { .. }))
+					}) {
+						break 'shroom true;
+					}
+				}
+				false
+			};
+			if !adjacent_to_shroom {
+				res_lw.grid.get_mut(&mover_coords).unwrap().obj =
+					Some(Obj::Shroom { move_token: false });
+			}
 		}
+		// Done ^^.
 		LogicalTransition { resulting_lw: res_lw, logical_events }
 	}
 }
