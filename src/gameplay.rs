@@ -66,7 +66,7 @@ impl Obj {
 	/// pusher succeeds to push (force >= total mass) or fails to push (force < total mass).
 	fn mass(&self) -> i32 {
 		match self {
-			Obj::Wall | Obj::Door => 10,
+			Obj::Wall | Obj::Door | Obj::Shroom { .. } => 10,
 			Obj::Bunny { .. } | Obj::Slime { .. } | Obj::Shroomer { .. } => 3,
 			_ => 1,
 		}
