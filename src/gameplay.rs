@@ -196,6 +196,9 @@ impl LogicalWorld {
 	pub fn tile(&self, coords: IVec2) -> Option<&Tile> {
 		self.grid.get(&coords)
 	}
+	pub fn obj(&self, coords: IVec2) -> Option<&Obj> {
+		self.grid.get(&coords).and_then(|tile| tile.obj.as_ref())
+	}
 
 	fn player_coords(&self) -> Option<IVec2> {
 		self.grid.iter().find_map(|(&coords, tile)| {
@@ -216,12 +219,9 @@ impl LogicalWorld {
 		// If the player is adjacent to a vision gem then they get see-through vision.
 		if let Some(player_coords) = player_coords {
 			let adjacent_to_vision_gem = 'vision_gem: {
-				for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-					let to_adjecent = IVec2::from(to_adjecent);
+				for to_adjecent in four_directions() {
 					let adjacent_coords = player_coords + to_adjecent;
-					if self.grid.get(&adjacent_coords).is_some_and(|tile| {
-						tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::VisionGem))
-					}) {
+					if let Some(Obj::VisionGem) = self.obj(adjacent_coords) {
 						break 'vision_gem true;
 					}
 				}
@@ -255,9 +255,7 @@ impl LogicalWorld {
 								break true;
 							}
 							let point_coords = point.round().as_ivec2();
-							if lw_clone.grid.get(&point_coords).is_some_and(|tile| {
-								tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
-							}) {
+							if lw_clone.obj(point_coords).is_some_and(|obj| obj.blocks_vision()) {
 								// A vision-blocking object is blocking the line of sight.
 								break point_coords == *coords;
 							}
@@ -279,8 +277,7 @@ impl LogicalWorld {
 					&& lw_clone.grid.get(coords).is_some_and(|tile| {
 						!tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
 					}) {
-					for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-						let to_adjecent = IVec2::from(to_adjecent);
+					for to_adjecent in four_directions() {
 						let adjacent_coords = *coords + to_adjecent;
 						if lw_clone.grid.get(&adjacent_coords).is_some_and(|tile| {
 							tile.visible
@@ -304,14 +301,13 @@ impl LogicalWorld {
 					&& lw_clone.grid.get(coords).is_some_and(|tile| {
 						!tile.visible && tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision())
 					}) {
-					for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+					for to_adjecent in four_directions() {
 						// Sorry for the very bad code here,
 						// it could do with lots of cleanup,
 						// for the story, it makes sure that the corner that we are about
 						// to make visible despite it being out of sight is a corner that
 						// would complete the corner of a piece of room in which the player is.
 						// TODO: Make this more readable.
-						let to_adjecent = IVec2::from(to_adjecent);
 						let adjacent_coords = *coords + to_adjecent;
 						let other_adjacent_coords = *coords + to_adjecent.perp();
 						let corner_coords = *coords + to_adjecent + to_adjecent.perp();
@@ -347,9 +343,7 @@ impl LogicalWorld {
 	fn generated_walls_outside(mut self) -> LogicalWorld {
 		let keys: Vec<_> = self.grid.keys().copied().collect();
 		for coords in keys {
-			if self.grid.get(&coords).is_some_and(|tile| {
-				tile.obj.is_none() || tile.obj.as_ref().is_some_and(|obj| !matches!(obj, Obj::Wall))
-			}) {
+			if !matches!(self.obj(coords), Some(Obj::Wall)) {
 				for coords in filled_rect(coords - IVec2::new(1, 1), IVec2::new(3, 3)) {
 					self.place_tile_no_overwrite(coords, Tile::obj(Obj::Wall));
 				}
@@ -367,7 +361,7 @@ impl LogicalWorld {
 				.generated_walls_outside()
 				.updated_visibility()
 		} else {
-			LogicalTransition { resulting_lw: self.clone(), logical_events: vec![] }
+			self.clone().into()
 		}
 	}
 
@@ -392,33 +386,17 @@ impl LogicalWorld {
 				if obj.has_move_token() {
 					let mut res_lw = self.clone();
 					res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
-					let is_shroom = res_lw
-						.grid
-						.get(coords)
-						.unwrap()
-						.obj
-						.as_ref()
-						.is_some_and(|obj| matches!(obj, Obj::Shroom { .. }));
-					let is_shroomer = res_lw
-						.grid
-						.get(coords)
-						.unwrap()
-						.obj
-						.as_ref()
-						.is_some_and(|obj| matches!(obj, Obj::Shroomer { .. }));
+					let is_shroom = matches!(res_lw.obj(*coords), Some(Obj::Shroom { .. }));
+					let is_shroomer = matches!(res_lw.obj(*coords), Some(Obj::Shroomer { .. }));
 					let direction = if is_shroom {
 						self.shroom_ai_decision(*coords)
 					} else {
 						self.ai_decision(*coords)
 					};
 					return Some(if let Some(direction) = direction {
-						let target_is_bunny = res_lw
-							.grid
-							.get(&(*coords + direction))
-							.unwrap()
-							.obj
-							.as_ref()
-							.is_some_and(|obj| matches!(obj, Obj::Bunny { .. }));
+						let target_coords = *coords + direction;
+						let target_is_bunny =
+							matches!(res_lw.obj(target_coords), Some(Obj::Bunny { .. }));
 						if is_shroom || (is_shroomer && target_is_bunny) {
 							res_lw.sacrifice_hit(*coords, direction).updated_visibility()
 						} else {
@@ -426,7 +404,7 @@ impl LogicalWorld {
 							res_lw.try_to_move(*coords, direction, argent_force).updated_visibility()
 						}
 					} else {
-						LogicalTransition { resulting_lw: res_lw, logical_events: vec![] }
+						res_lw.into()
 					});
 				}
 			}
@@ -466,11 +444,7 @@ impl LogicalWorld {
 				coords += direction;
 				if coords == target_coords {
 					break false;
-				} else if self
-					.grid
-					.get(&coords)
-					.is_some_and(|tile| tile.obj.as_ref().is_some_and(|obj| obj.blocks_vision()))
-				{
+				} else if self.obj(coords).is_some_and(|obj| obj.blocks_vision()) {
 					break true;
 				}
 			}
@@ -486,6 +460,7 @@ impl LogicalWorld {
 	fn shroom_ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
 		let target_coords = self.player_coords()?;
 		let direction = target_coords - agent_coords;
+		// Attack the player if adjacent.
 		(direction.x.abs() + direction.y.abs() == 1).then_some(direction)
 	}
 
@@ -545,33 +520,18 @@ impl LogicalWorld {
 					remaining_force -= dst_obj.mass();
 					if remaining_force < 0 {
 						// All the force of the pusher was used up, nothing more can be pushed.
-						// Now we scan the pushed chain backwards to search for an interaction.
+						// Now we scan the pushed chain backwards for an interaction.
 						while length_removed_due_to_interaction < length {
 							let src_coords = coords - direction;
-							let src_obj =
-								self.grid.get(&src_coords).as_ref().unwrap().obj.as_ref().unwrap();
-							let dst_obj = self.grid.get(&coords).as_ref().unwrap().obj.as_ref().unwrap();
+							let src_obj = self.obj(src_coords).unwrap();
+							let dst_obj = self.obj(coords).unwrap();
 							// The final object of the chain that would have been pushed but is blocked by
 							// the target now try to interact with the target.
 							final_interaction =
 								self.what_would_happen_if_interact(src_obj, dst_obj, coords);
 							if let Some(final_interaction) = final_interaction.as_ref() {
-								break 'success match final_interaction {
-									InteractionConsequences::Mine
-									| InteractionConsequences::KeyOpenDoor
-									| InteractionConsequences::StompShroom
-									| InteractionConsequences::Kill { .. } => {
-										// The target is killed, and as a design choice I find it cool
-										// that since now what was blocking is no more then the push
-										// happens now.
-										true
-									},
-									InteractionConsequences::Exit { .. } => true,
-									InteractionConsequences::Heal | InteractionConsequences::GainARedo => {
-										true
-									},
-									InteractionConsequences::NonLethalHit { .. } => false,
-								};
+								// Depending on the interaction, the move may succeed or not.
+								break 'success final_interaction.allows_move();
 							}
 							length_removed_due_to_interaction += 1;
 							coords -= direction;
@@ -596,20 +556,16 @@ impl LogicalWorld {
 		let mut can_pull_next = false;
 		loop {
 			coords -= direction;
-			if let Some(dst_tile) = self.grid.get(&coords) {
-				if let Some(dst_obj) = dst_tile.obj.as_ref() {
-					if matches!(dst_obj, Obj::Rope) || can_pull_next {
-						can_pull_next = false;
-						remaining_force -= dst_obj.mass();
-						if remaining_force < 0 {
-							break;
-						}
-						pulled_length += 1;
-						if matches!(dst_obj, Obj::Rope) {
-							can_pull_next = true;
-						}
-					} else {
+			if let Some(dst_obj) = self.obj(coords) {
+				if matches!(dst_obj, Obj::Rope) || can_pull_next {
+					can_pull_next = false;
+					remaining_force -= dst_obj.mass();
+					if remaining_force < 0 {
 						break;
+					}
+					pulled_length += 1;
+					if matches!(dst_obj, Obj::Rope) {
+						can_pull_next = true;
 					}
 				} else {
 					break;
@@ -758,17 +714,13 @@ impl LogicalWorld {
 			}
 		}
 		// Shroomer tries to shroom.
-		if self.grid.get(&mover_coords).is_some_and(|tile| {
-			tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Shroomer { .. }))
-				&& res_lw.grid.get(&mover_coords).is_some_and(|tile| tile.obj.as_ref().is_none())
-		}) {
+		if matches!(self.obj(mover_coords), Some(Obj::Shroomer { .. }))
+			&& res_lw.obj(mover_coords).is_none()
+		{
 			let adjacent_to_shroom = 'shroom: {
-				for to_adjecent in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-					let to_adjecent = IVec2::from(to_adjecent);
+				for to_adjecent in four_directions() {
 					let adjacent_coords = mover_coords + to_adjecent;
-					if self.grid.get(&adjacent_coords).is_some_and(|tile| {
-						tile.obj.as_ref().is_some_and(|obj| matches!(obj, Obj::Shroom { .. }))
-					}) {
+					if matches!(self.obj(adjacent_coords), Some(Obj::Shroom { .. })) {
 						break 'shroom true;
 					}
 				}
@@ -835,6 +787,22 @@ enum InteractionConsequences {
 	GainARedo,
 	/// Something stomps on a shroom, the poor thing.
 	StompShroom,
+}
+
+impl InteractionConsequences {
+	/// Does this intercation clears up a tile so that the move is allowed to succeed?
+	fn allows_move(&self) -> bool {
+		match self {
+			InteractionConsequences::NonLethalHit { .. } => false,
+			InteractionConsequences::Kill { .. }
+			| InteractionConsequences::Mine
+			| InteractionConsequences::StompShroom
+			| InteractionConsequences::KeyOpenDoor
+			| InteractionConsequences::Heal
+			| InteractionConsequences::GainARedo
+			| InteractionConsequences::Exit { .. } => true,
+		}
+	}
 }
 
 struct MoveAttemptConsequences {
@@ -917,6 +885,12 @@ pub struct LogicalTransition {
 	pub resulting_lw: LogicalWorld,
 }
 
+impl From<LogicalWorld> for LogicalTransition {
+	fn from(lw: LogicalWorld) -> LogicalTransition {
+		LogicalTransition { resulting_lw: lw, logical_events: vec![] }
+	}
+}
+
 impl LogicalTransition {
 	pub fn updated_visibility(self) -> LogicalTransition {
 		LogicalTransition {
@@ -931,4 +905,13 @@ impl LogicalTransition {
 			logical_events: self.logical_events,
 		}
 	}
+}
+
+fn four_directions() -> [IVec2; 4] {
+	[
+		IVec2::from((1, 0)),
+		IVec2::from((0, 1)),
+		IVec2::from((-1, 0)),
+		IVec2::from((0, -1)),
+	]
 }

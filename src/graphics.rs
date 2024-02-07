@@ -455,6 +455,14 @@ impl GraphicalWorld {
 			} else {
 				center
 			};
+			let margin = 50.0;
+			if dest.x < -margin
+				|| dest.x > 800.0 + margin
+				|| dest.y < -margin
+				|| dest.y > 800.0 + margin
+			{
+				continue;
+			}
 			let plain_color = sprite.plain_color();
 			let (spritesheet, color) = if let Some(color) = plain_color {
 				// A plain color shall be multiplied to the sprite, but we want all the sprite
