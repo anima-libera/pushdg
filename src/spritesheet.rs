@@ -73,6 +73,7 @@ impl SpriteFromSheet {
 	pub fn rect_in_spritesheet(&self) -> Rect {
 		// Wild non-aligned sprites.
 		if let SpriteFromSheet::Digit(digit) = self {
+			assert!(*digit <= 9);
 			let x = digit * 4;
 			let y = 16;
 			return Rect::new(x as f32 / 128.0, y as f32 / 128.0, 3.0 / 128.0, 5.0 / 128.0);
