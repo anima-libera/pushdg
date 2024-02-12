@@ -3,7 +3,7 @@
 use ggez::glam::IVec2;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 
-use crate::gameplay::{LogicalWorld, Obj, Tile};
+use crate::gameplay::{four_directions, LogicalWorld, Obj, Tile};
 
 fn randint(inf: i32, sup_included: i32) -> i32 {
 	thread_rng().gen_range(inf..=sup_included)
@@ -110,6 +110,10 @@ impl Generator {
 				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 				(8, Some(Obj::Shroomer { hp: 5, move_token: false })),
 				(6, Some(Obj::Shroom { move_token: false })),
+				(
+					8,
+					Some(Obj::Fish { direction: IVec2::new(1, 0), move_token: false }),
+				),
 			];
 			let total_weight: i32 = obj_table.iter().map(|(weight, _obj)| weight).sum();
 			// Fill the room.
@@ -125,7 +129,10 @@ impl Generator {
 					}
 					unreachable!("The value should reach zero before the end due to the range");
 				};
-				if let Some(obj) = obj {
+				if let Some(mut obj) = obj.clone() {
+					if let Obj::Fish { ref mut direction, .. } = obj {
+						*direction = four_directions()[randint(0, 3) as usize];
+					}
 					self.lw.place_tile(coords, Tile::obj(obj.clone()));
 				}
 			}

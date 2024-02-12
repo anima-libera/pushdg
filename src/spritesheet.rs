@@ -1,6 +1,7 @@
 //! Spritesheet related matters, such as loading or providing the rect of a sprite in the sheet.
 
 use ggez::{
+	glam::IVec2,
 	graphics::{Image, ImageFormat, Rect},
 	Context, GameResult,
 };
@@ -63,6 +64,7 @@ pub enum SpriteFromSheet {
 	Bush,
 	Heart,
 	RedoHeart,
+	Fish(IVec2),
 	Digit(u8),
 	Slash,
 }
@@ -100,6 +102,13 @@ impl SpriteFromSheet {
 			SpriteFromSheet::Bush => (14, 0),
 			SpriteFromSheet::Heart => (1, 1),
 			SpriteFromSheet::RedoHeart => (2, 1),
+			SpriteFromSheet::Fish(IVec2 { x: -1, y: 0 }) => (3, 1),
+			SpriteFromSheet::Fish(IVec2 { x: 1, y: 0 }) => (4, 1),
+			SpriteFromSheet::Fish(IVec2 { x: 0, y: -1 }) => (5, 1),
+			SpriteFromSheet::Fish(IVec2 { x: 0, y: 1 }) => (6, 1),
+			SpriteFromSheet::Fish(invalid_direction) => {
+				panic!("direction {invalid_direction} is not a valid fish direction")
+			},
 			SpriteFromSheet::Digit(_) | SpriteFromSheet::Slash => unreachable!("Handled above"),
 		};
 		Rect::new(

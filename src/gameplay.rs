@@ -60,6 +60,12 @@ pub enum Obj {
 		/// This token indicates that this agent has yet to make a move.
 		move_token: bool,
 	},
+	/// Fish that moves on its own.
+	Fish {
+		direction: IVec2,
+		/// This token indicates that this agent has yet to make a move.
+		move_token: bool,
+	},
 }
 
 impl Obj {
@@ -117,7 +123,8 @@ impl Obj {
 		match self {
 			Obj::Slime { move_token, .. }
 			| Obj::Shroomer { move_token, .. }
-			| Obj::Shroom { move_token } => *move_token = true,
+			| Obj::Shroom { move_token }
+			| Obj::Fish { move_token, .. } => *move_token = true,
 			_ => {},
 		}
 	}
@@ -126,7 +133,8 @@ impl Obj {
 		match self {
 			Obj::Slime { move_token, .. }
 			| Obj::Shroomer { move_token, .. }
-			| Obj::Shroom { move_token } => *move_token,
+			| Obj::Shroom { move_token }
+			| Obj::Fish { move_token, .. } => *move_token,
 			_ => false,
 		}
 	}
@@ -135,7 +143,8 @@ impl Obj {
 		match self {
 			Obj::Slime { move_token, .. }
 			| Obj::Shroomer { move_token, .. }
-			| Obj::Shroom { move_token } => {
+			| Obj::Shroom { move_token }
+			| Obj::Fish { move_token, .. } => {
 				let had_move_token = *move_token;
 				*move_token = false;
 				had_move_token
@@ -390,8 +399,11 @@ impl LogicalWorld {
 					res_lw.grid.get_mut(coords).unwrap().obj.as_mut().unwrap().take_move_token();
 					let is_shroom = matches!(res_lw.obj(*coords), Some(Obj::Shroom { .. }));
 					let is_shroomer = matches!(res_lw.obj(*coords), Some(Obj::Shroomer { .. }));
+					let is_fish = matches!(res_lw.obj(*coords), Some(Obj::Fish { .. }));
 					let direction = if is_shroom {
 						self.shroom_ai_decision(*coords)
+					} else if is_fish {
+						self.fish_ai_decision(*coords)
 					} else {
 						self.ai_decision(*coords)
 					};
@@ -464,6 +476,23 @@ impl LogicalWorld {
 		let direction = target_coords - agent_coords;
 		// Attack the player if adjacent.
 		(direction.x.abs() + direction.y.abs() == 1).then_some(direction)
+	}
+
+	/// Fish AI.
+	fn fish_ai_decision(&self, agent_coords: IVec2) -> Option<IVec2> {
+		let direction = if let Some(Obj::Fish { direction, .. }) = self.obj(agent_coords) {
+			*direction
+		} else {
+			return None;
+		};
+		let dst_coords = agent_coords + direction;
+		let target_coords = self.player_coords()?;
+		let noting_ahead = self.grid.get(&dst_coords).is_some() && self.obj(dst_coords).is_none();
+		if target_coords == dst_coords || noting_ahead {
+			Some(direction)
+		} else {
+			Some(-direction)
+		}
 	}
 
 	/// If the source object was pushed into the destination object in a blocked push, then what?
@@ -596,6 +625,10 @@ impl LogicalWorld {
 					&mut previous_obj,
 					&mut res_lw.grid.get_mut(&coords).unwrap().obj,
 				);
+				previous_obj = match previous_obj.take() {
+					Some(Obj::Fish { move_token, .. }) => Some(Obj::Fish { direction, move_token }),
+					x => x,
+				};
 				let is_exiting = if let Some(InteractionConsequences::Exit { at }) = final_interaction {
 					at == coords + direction
 				} else {
@@ -909,7 +942,7 @@ impl LogicalTransition {
 	}
 }
 
-fn four_directions() -> [IVec2; 4] {
+pub fn four_directions() -> [IVec2; 4] {
 	[
 		IVec2::from((1, 0)),
 		IVec2::from((0, 1)),

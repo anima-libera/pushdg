@@ -151,6 +151,7 @@ fn obj_to_sprite(obj: &Obj) -> SpriteFromSheet {
 		Obj::Slime { .. } => SpriteFromSheet::Slime,
 		Obj::Shroomer { .. } => SpriteFromSheet::Shroomer,
 		Obj::Shroom { .. } => SpriteFromSheet::Shroom,
+		Obj::Fish { direction, .. } => SpriteFromSheet::Fish(*direction),
 	}
 }
 
