@@ -39,6 +39,8 @@ pub enum Obj {
 	Key,
 	/// Pulls and is pulled.
 	Rope,
+	/// Vision-blocking pushable object.
+	Bush,
 	/// The player. We play as a bunny. It is cute! :3
 	Bunny { hp: i32, max_hp: i32 },
 	/// The basic enemy.
@@ -103,7 +105,7 @@ impl Obj {
 
 	/// Can the player see over it?
 	fn blocks_vision(&self) -> bool {
-		matches!(self, Obj::Wall)
+		matches!(self, Obj::Wall | Obj::Bush)
 	}
 
 	/// Some agents may be neutral, this only flags agents that are hostile to the player.

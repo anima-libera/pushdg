@@ -106,6 +106,7 @@ impl Generator {
 				(2, Some(Obj::RedoHeart)),
 				(3, Some(Obj::Key)),
 				(3, Some(Obj::Rope)),
+				(2, Some(Obj::Bush)),
 				(25, Some(Obj::Slime { hp: 5, move_token: false })),
 				(8, Some(Obj::Shroomer { hp: 5, move_token: false })),
 				(6, Some(Obj::Shroom { move_token: false })),
